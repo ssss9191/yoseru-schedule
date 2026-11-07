@@ -1,0 +1,193 @@
+(function () {
+  'use strict';
+
+  const prefix = 'yoseru.v1.';
+  const sampleId = 'demo';
+  const cache = new Map();
+  const listeners = new Set();
+  let persistent = true;
+  try {
+    localStorage.setItem(`${prefix}probe`, '1');
+    localStorage.removeItem(`${prefix}probe`);
+  } catch {
+    persistent = false;
+  }
+
+  function read(key) {
+    const value = persistent ? localStorage.getItem(prefix + key) : cache.get(key);
+    return value ? JSON.parse(value) : null;
+  }
+
+  function write(key, value) {
+    const json = JSON.stringify(value);
+    if (persistent) localStorage.setItem(prefix + key, json);
+    else cache.set(key, json);
+  }
+
+  function id() {
+    return [...crypto.getRandomValues(new Uint8Array(12))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function identity() {
+    let uid = read('uid');
+    if (!uid) {
+      uid = id();
+      write('uid', uid);
+    }
+    return uid;
+  }
+
+  function sampleSlots() {
+    return [
+      { id: id(), date: '2026-11-16', start: 1080, end: 1200 },
+      { id: id(), date: '2026-11-16', start: 1230, end: 1320 },
+      { id: id(), date: '2026-11-18', start: 1140, end: 1260 },
+      { id: id(), date: '2026-11-20', start: 1080, end: null }
+    ];
+  }
+
+  function makeEvent(eventId, ownerUid, title, slots) {
+    return {
+      id: eventId, ownerUid, title, slots, minimum: 60, status: 'open',
+      locked: false, revision: 0, final: null, updatedAt: Date.now()
+    };
+  }
+
+  function initializeSample(uid) {
+    if (read(`event.${sampleId}`)) return;
+    const slots = sampleSlots();
+    const event = makeEvent(sampleId, uid, 'ゼミ発表の打ち合わせ', slots);
+    event.locked = true;
+    const yes = (from = 0, to = 0) => ({ mark: 'yes', from, to });
+    const maybe = (from = 0, to = 0) => ({ mark: 'maybe', from, to });
+    const no = { mark: 'no', from: 0, to: 0 };
+    const responses = [
+      ['demo-a', '青木', [yes(), no, no, yes()]],
+      ['demo-b', '佐藤', [maybe(30, -30), yes(), yes(), maybe()]],
+      ['demo-c', '田中', [yes(-30, 30), no, yes(), no]]
+    ].map(([uid, name, answers]) => ({ uid, name, answers: Object.fromEntries(slots.map((slot, index) => [slot.id, answers[index]])) }));
+    write(`event.${sampleId}`, { event, responses });
+  }
+
+  function get(eventId) {
+    if (eventId === sampleId) initializeSample(identity());
+    return read(`event.${eventId}`);
+  }
+
+  function listOwned(uid) {
+    const keys = persistent
+      ? Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+        .filter(key => key?.startsWith(prefix)).map(key => key.slice(prefix.length))
+      : [...cache.keys()];
+    return keys.filter(key => key.startsWith('event.') && key !== `event.${sampleId}`)
+      .map(key => read(key))
+      .filter(record => record?.event?.ownerUid === uid)
+      .sort((a, b) => (b.event.updatedAt ?? 0) - (a.event.updatedAt ?? 0) ||
+        a.event.title.localeCompare(b.event.title, 'ja') || a.event.id.localeCompare(b.event.id));
+  }
+
+  function notify(eventId) {
+    listeners.forEach(listener => listener(eventId));
+  }
+
+  function withEvent(eventId, change) {
+    const save = () => {
+      const record = get(eventId);
+      if (!record) throw new Error('イベントが見つかりません。');
+      change(record);
+      record.event.updatedAt = Date.now();
+      write(`event.${eventId}`, record);
+      notify(eventId);
+      return record;
+    };
+    if (navigator.locks && persistent) return navigator.locks.request(prefix + eventId, save);
+    return Promise.resolve().then(save);
+  }
+
+  function requireOwner(event, uid) {
+    if (event.ownerUid !== uid) throw new Error('主催者として操作してください。');
+  }
+
+  function create(uid) {
+    const event = makeEvent(id(), uid, '新しい日程調整', []);
+    write(`event.${event.id}`, { event, responses: [] });
+    return event.id;
+  }
+
+  function update(eventId, uid, revision, changes) {
+    return withEvent(eventId, ({ event }) => {
+      requireOwner(event, uid);
+      if (event.locked || event.status === 'closed') throw new Error('回答受付が始まったため、候補と開催条件を編集できません。');
+      if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
+      Object.assign(event, changes, { revision: revision + 1 });
+    });
+  }
+
+  function submit(eventId, uid, revision, draft) {
+    return withEvent(eventId, ({ event, responses }) => {
+      if (event.status === 'closed') throw new Error('日程が確定し、回答受付は終了しました。');
+      if (event.revision !== revision) throw new Error('候補が変更されました。最新の日時を確認してから保存してください。');
+      const name = draft.name.trim();
+      if (!name || name.length > 40) throw new Error('名前を1〜40文字で入力してください。');
+      if (!event.slots.length) throw new Error('回答できる候補がまだありません。');
+      const answers = Object.fromEntries(event.slots.map(slot => {
+        const answer = draft.answers[slot.id];
+        if (Schedule.needsBuffer(slot, answer)) throw new Error('○の候補の前後の余裕を指定してください。');
+        const error = Schedule.answerError(slot, answer);
+        if (error) throw new Error(error);
+        const useOffsets = slot.end !== null && answer.mark !== 'no';
+        return [slot.id, { mark: answer.mark, from: useOffsets ? answer.from ?? 0 : 0, to: useOffsets ? answer.to ?? 0 : 0 }];
+      }));
+      const response = { uid, name, answers };
+      const index = responses.findIndex(item => item.uid === uid);
+      if (index < 0) responses.push(response);
+      else responses[index] = response;
+      event.locked = true;
+    });
+  }
+
+  function finalize(eventId, uid, selected) {
+    return withEvent(eventId, ({ event, responses }) => {
+      requireOwner(event, uid);
+      if (event.status === 'closed') throw new Error('この日程は確定済みです。');
+      const proposal = Schedule.proposals(event, responses).find(item =>
+        item.slot.id === selected.slot.id && item.start === selected.start && item.end === selected.end &&
+        item.people.map(person => person.uid).join() === selected.people.map(person => person.uid).join());
+      if (!proposal) throw new Error('回答が更新されました。最新の提案を確認してください。');
+      event.final = { slotId: proposal.slot.id, date: proposal.slot.date, start: proposal.start, end: proposal.end, count: proposal.people.length };
+      event.status = 'closed';
+      event.locked = true;
+    });
+  }
+
+  function reopen(eventId, uid, expectedFinal) {
+    return withEvent(eventId, ({ event }) => {
+      requireOwner(event, uid);
+      const final = event.final;
+      if (event.status !== 'closed' || !final) throw new Error('回答受付はすでに再開されています。');
+      if (final.slotId !== expectedFinal.slotId || final.start !== expectedFinal.start || final.end !== expectedFinal.end) {
+        throw new Error('確定日時が変わりました。最新の日時を確認してください。');
+      }
+      event.final = null;
+      event.status = 'open';
+    });
+  }
+
+  window.addEventListener('storage', event => {
+    const eventPrefix = `${prefix}event.`;
+    if (event.key?.startsWith(eventPrefix)) notify(event.key.slice(eventPrefix.length));
+  });
+
+  // Replace this interface with a Firestore adapter; the view never writes
+  // directly to browser storage or publishes a draft response.
+  globalThis.DemoStore = {
+    get, listOwned, create, update, submit, finalize, reopen, identity, id, sampleId, persistent,
+    profiles(eventId) { return read('profiles.' + eventId) ?? []; },
+    addProfile(eventId) {
+      const uid = id();
+      write('profiles.' + eventId, [...this.profiles(eventId), uid]);
+      return uid;
+    },
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
+  };
+})();
