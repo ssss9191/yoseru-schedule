@@ -39,10 +39,12 @@
       return snapshot.docs.flatMap(document => {
         const response = document.data();
         if (response.uid !== document.id || typeof response.name !== 'string' ||
-            !response.name.trim() || response.name.length > 40 || !response.answers ||
-            event.slots.some(slot => Schedule.needsBuffer(slot, response.answers[slot.id]) ||
-              Schedule.answerError(slot, response.answers[slot.id]))) return [];
-        return [{ uid: response.uid, name: response.name, answers: response.answers }];
+            !response.name.trim() || response.name.length > 40 || !response.answers) return [];
+        const answers = Object.fromEntries(event.slots.flatMap(slot => {
+          const answer = response.answers[slot.id];
+          return Schedule.needsBuffer(slot, answer) || Schedule.answerError(slot, answer) ? [] : [[slot.id, answer]];
+        }));
+        return [{ uid: response.uid, name: response.name, answers }];
       });
     }
 
@@ -147,7 +149,9 @@
       const before = readEvent(snapshot);
       const responses = readResponses(await firestore.getDocsFromServer(responsesRef(id)), before);
       return changeEvent(id, event => {
-        if (event.responseVersion !== before.responseVersion) throw new Error('回答が更新されました。最新の提案を確認してください。');
+        if (event.responseVersion !== before.responseVersion || event.revision !== before.revision) {
+          throw new Error('候補または回答が更新されました。最新の提案を確認してください。');
+        }
         model.setFinal(event, responses, uid, selected);
         return { status: event.status, final: event.final };
       });

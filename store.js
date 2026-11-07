@@ -116,8 +116,21 @@
 
   function editEvent(event, uid, revision, changes) {
     requireOwner(event, uid);
-    if (event.locked || event.status === 'closed') throw new Error('回答受付が始まったため、候補と開催条件を編集できません。');
+    if (event.status === 'closed') throw new Error('確定を取り消してから候補を編集してください。');
     if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
+    if (event.locked && ((changes.title !== undefined && changes.title !== event.title) ||
+        (changes.minimum !== undefined && changes.minimum !== event.minimum))) {
+      throw new Error('回答受付が始まったため、イベント名と最低開催時間は編集できません。');
+    }
+    if (changes.slots) {
+      const previous = new Map(event.slots.map(slot => [slot.id, slot]));
+      // A changed time is a new choice. Its previous answers cannot follow it.
+      changes = { ...changes, slots: changes.slots.map(slot => {
+        const old = previous.get(slot.id);
+        return old && (old.date !== slot.date || old.start !== slot.start || old.end !== slot.end)
+          ? { ...slot, id: id() } : slot;
+      }) };
+    }
     Object.assign(event, changes, { revision: revision + 1 });
   }
 

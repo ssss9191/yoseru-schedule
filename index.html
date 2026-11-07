@@ -116,7 +116,8 @@
       <p>カレンダーで日付を選び、同じ時間枠をまとめて追加できます。</p>
     </header>
 
-    <p id="organizer-locked" class="notice" hidden>🔒 回答が保存されたため、候補日時と開催条件は固定されています。</p>
+    <p id="organizer-locked" class="notice" hidden>日程を確定済みです。候補を編集するには「確定を取り消す」で受付を再開してください。</p>
+    <p id="organizer-edit-note" class="notice" hidden>追加・変更した枠には、新しく回答が必要です。ほかの枠への回答は引き継がれます。</p>
     <section class="panel event-settings">
       <label>イベント名<input id="event-name" maxlength="60"></label>
       <label>
@@ -142,8 +143,9 @@
         <div class="panel-heading">
           <span class="step">2</span>
           <h3 id="add-time-title">時間枠を指定</h3>
-          <h3 id="edit-time-title" hidden>選択した候補の時刻を編集</h3>
+          <h3 id="edit-time-title" hidden>選択した候補を編集</h3>
         </div>
+        <label id="edit-date-row" class="edit-date" hidden>変更後の日付<input id="edit-date" type="date"></label>
         <p class="hint">「選ぶ」で時と分を指定。分の候補は10分刻みで、数字は直接入力もできます。</p>
         <div class="time-editor">
           <div class="time-group">
@@ -221,7 +223,7 @@
         <label>名前<input id="answer-name" maxlength="40" placeholder="例：佐藤"></label>
         <p class="hint">保存した名前と回答は、このイベントの回答一覧に表示されます。</p>
       </div>
-      <p id="answer-stale" class="notice" hidden>候補が変更されたため、日時を確認して回答を選び直してください。</p>
+    <p id="answer-stale" class="notice" hidden>候補が更新されました。追加・変更された枠に回答してください。</p>
       <div class="answer-list"></div>
       <div class="panel save-panel">
         <div>

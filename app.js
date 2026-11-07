@@ -311,14 +311,15 @@ function slotList(editable) {
 
 function renderOrganizer() {
   const content = template('organizer');
-  const locked = event().locked;
+  const closed = event().status === 'closed';
   const slotCount = event().slots.length;
   const editing = org.selected.size > 0;
-  $('#organizer-locked', content).hidden = !locked;
-  $('.event-settings', content).hidden = locked;
-  $('.organizer-grid', content).hidden = locked;
+  $('#organizer-locked', content).hidden = !closed;
+  $('#organizer-edit-note', content).hidden = closed || !event().locked;
+  $('.event-settings', content).hidden = closed || event().locked;
+  $('.organizer-grid', content).hidden = closed;
 
-  if (!locked) {
+  if (!closed) {
     $('#event-name', content).value = org.title;
     $('#minimum', content).value = org.minimum;
     $('#calendar', content).innerHTML = renderCalendar();
@@ -334,6 +335,8 @@ function renderOrganizer() {
     }
     $('#end-time', content).hidden = !org.hasEnd;
     $('#has-end', content).checked = org.hasEnd;
+    $('#edit-date-row', content).hidden = org.selected.size !== 1;
+    $('#edit-date', content).value = org.editDate ?? '';
     $('#edit-slot-count', content).textContent = org.selected.size;
     for (const selector of ['#add-time-title', '#add-time-hint', '[data-action=add-slots]']) {
       $(selector, content).hidden = editing;
@@ -343,12 +346,12 @@ function renderOrganizer() {
     }
   }
 
-  if (locked) $('#slot-list-step', content).textContent = '✓';
+  if (closed) $('#slot-list-step', content).textContent = '✓';
   $('#registered-count', content).textContent = slotCount + '件';
-  $('#registered-slots', content).innerHTML = slotList(!locked);
-  $('#select-all-slots', content).hidden = locked || !slotCount;
+  $('#registered-slots', content).innerHTML = slotList(!closed);
+  $('#select-all-slots', content).hidden = closed || !slotCount;
   $('#all-slots', content).checked = slotCount > 0 && org.selected.size === slotCount;
-  $('.bulk', content).hidden = locked || !slotCount;
+  $('.bulk', content).hidden = closed || !slotCount;
   $('#bulk-count', content).textContent = org.selected.size;
   $('#edit-selection-hint', content).hidden = !editing;
   $('[data-action=delete-slots]', content).disabled = !org.selected.size;
@@ -364,9 +367,11 @@ function draft() {
     drafts.set(key, current);
   }
   if (current.revision !== event().revision) {
-    current.answers = {};
+    const slots = event().slots;
+    current.answers = Object.fromEntries(slots.filter(slot => current.answers[slot.id])
+      .map(slot => [slot.id, current.answers[slot.id]]));
     current.revision = event().revision;
-    current.stale = true;
+    current.stale = slots.some(slot => !current.answers[slot.id]);
   }
   return current;
 }
@@ -441,7 +446,8 @@ function renderAnswer() {
   const current = draft();
   $('#answer-form', content).hidden = false;
   $('#answer-name', content).value = current.name;
-  $('#answer-stale', content).hidden = !current.stale;
+  const needsNewAnswers = current.saved && event().slots.some(slot => !current.saved.answers[slot.id]);
+  $('#answer-stale', content).hidden = !current.stale && !needsNewAnswers;
   $('.answer-list', content).append(...event().slots.map(slot => answerCard(slot, current.answers[slot.id])));
   const save = $('#save-answer', content);
   if (record.responses.some(response => response.uid === uid)) save.textContent = save.dataset.updateLabel;
@@ -472,7 +478,7 @@ function resultTable() {
       const counts = { yes: 0, maybe: 0, no: 0 };
       const cells = people.map(person => {
         const answer = person.answers[slot.id];
-        if (!answer) return '<td>—</td>';
+        if (!answer) return '<td><small>未回答</small></td>';
         counts[answer.mark]++;
         const interval = Schedule.availability(slot, answer);
         return '<td>' + badge(answer.mark) + (interval ? '<small class="numbers">' + rangeText(...interval) + '</small>' : '') + '</td>';
@@ -600,6 +606,10 @@ function chosenTimes() {
 }
 
 function setSelectedSlots(selected) {
+  if (selected.size === 1) {
+    const [id] = selected;
+    if (org.selected.size !== 1 || !org.selected.has(id)) org.editDate = event().slots.find(slot => slot.id === id).date;
+  }
   org.selected = selected;
   if (selected.size && !org.addDraft) {
     const first = event().slots.find(slot => selected.has(slot.id));
@@ -620,7 +630,15 @@ async function saveSlots(editing) {
   if (editing ? !org.selected.size : !org.dates.size) throw new Error(editing ? '編集する候補を選んでください。' : 'カレンダーで日付を選んでください。');
   const time = chosenTimes();
   const old = event().slots;
-  const slots = editing ? old.map(slot => org.selected.has(slot.id) ? { ...slot, ...time } : slot) :
+  let editDate;
+  if (editing && org.selected.size === 1) {
+    editDate = org.editDate;
+    const parsed = dateUTC(editDate);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDate) || Number.isNaN(parsed.getTime()) || isoDate(parsed) !== editDate) {
+      throw new Error('変更後の日付を指定してください。');
+    }
+  }
+  const slots = editing ? old.map(slot => org.selected.has(slot.id) ? { ...slot, ...time, date: editDate ?? slot.date } : slot) :
     old.concat([...org.dates].map(date => ({ id: store.id(), date, ...time })));
   const keys = slots.map(slot => [slot.date, slot.start, slot.end].join('/'));
   if (new Set(keys).size < keys.length) throw new Error('同じ日付・時刻の候補がすでにあります。時間を変えるか、日付の選択を見直してください。');
@@ -832,6 +850,7 @@ view.addEventListener('input', evt => {
   }
   if (field.id === 'event-name') org.title = field.value;
   if (field.id === 'minimum') org.minimum = field.value;
+  if (field.id === 'edit-date') org.editDate = field.value;
   if (field.id === 'answer-name') {
     const current = draft();
     current.name = field.value;
@@ -875,8 +894,9 @@ document.addEventListener('change', evt => {
     $('#has-end').focus();
   }
   if (field.dataset.slot) {
-    field.checked ? org.selected.add(field.dataset.slot) : org.selected.delete(field.dataset.slot);
-    setSelectedSlots(org.selected);
+    const selected = new Set(org.selected);
+    field.checked ? selected.add(field.dataset.slot) : selected.delete(field.dataset.slot);
+    setSelectedSlots(selected);
     renderOrganizer();
     $('[data-slot="' + field.dataset.slot + '"]').focus();
   }

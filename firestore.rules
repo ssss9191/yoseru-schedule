@@ -32,8 +32,9 @@ service cloud.firestore {
     }
 
     function changesCandidates(before, after, keys) {
-      return before.ownerUid == request.auth.uid && before.status == 'open' && before.locked == false
+      return before.ownerUid == request.auth.uid && before.status == 'open'
         && keys.hasOnly(['title', 'minimum', 'slots', 'slotIds', 'revision', 'updatedAt'])
+        && (!before.locked || !keys.hasAny(['title', 'minimum']))
         && after.revision == before.revision + 1 && validCandidates(after);
     }
 

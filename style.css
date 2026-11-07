@@ -122,6 +122,8 @@ input:not([type=checkbox], [type=range]) { display: block; background: var(--pap
 .time-editor:has(#end-time[hidden]) .time-sep { display: none; }
 .time-group { min-width: 0; }
 .time-group > strong { display: block; margin-bottom: 5px; font-size: .88rem; }
+.edit-date { display: block; margin-top: 10px; color: var(--muted); font-size: .82rem; font-weight: 750; }
+.edit-date input { margin-top: 4px; max-width: 220px; }
 .combo { position: relative; }
 .clock-entry {
   display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
