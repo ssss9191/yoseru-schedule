@@ -114,31 +114,37 @@
     return event.id;
   }
 
+  function editEvent(event, uid, revision, changes) {
+    requireOwner(event, uid);
+    if (event.locked || event.status === 'closed') throw new Error('回答受付が始まったため、候補と開催条件を編集できません。');
+    if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
+    Object.assign(event, changes, { revision: revision + 1 });
+  }
+
+  function makeResponse(event, uid, revision, draft) {
+    if (event.status === 'closed') throw new Error('日程が確定し、回答受付は終了しました。');
+    if (event.revision !== revision) throw new Error('候補が変更されました。最新の日時を確認してから保存してください。');
+    const name = draft.name.trim();
+    if (!name || name.length > 40) throw new Error('名前を1〜40文字で入力してください。');
+    if (!event.slots.length) throw new Error('回答できる候補がまだありません。');
+    const answers = Object.fromEntries(event.slots.map(slot => {
+      const answer = draft.answers[slot.id];
+      if (Schedule.needsBuffer(slot, answer)) throw new Error('○の候補の前後の余裕を指定してください。');
+      const error = Schedule.answerError(slot, answer);
+      if (error) throw new Error(error);
+      const useOffsets = slot.end !== null && answer.mark !== 'no';
+      return [slot.id, { mark: answer.mark, from: useOffsets ? answer.from ?? 0 : 0, to: useOffsets ? answer.to ?? 0 : 0 }];
+    }));
+    return { uid, name, answers };
+  }
+
   function update(eventId, uid, revision, changes) {
-    return withEvent(eventId, ({ event }) => {
-      requireOwner(event, uid);
-      if (event.locked || event.status === 'closed') throw new Error('回答受付が始まったため、候補と開催条件を編集できません。');
-      if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
-      Object.assign(event, changes, { revision: revision + 1 });
-    });
+    return withEvent(eventId, ({ event }) => editEvent(event, uid, revision, changes));
   }
 
   function submit(eventId, uid, revision, draft) {
     return withEvent(eventId, ({ event, responses }) => {
-      if (event.status === 'closed') throw new Error('日程が確定し、回答受付は終了しました。');
-      if (event.revision !== revision) throw new Error('候補が変更されました。最新の日時を確認してから保存してください。');
-      const name = draft.name.trim();
-      if (!name || name.length > 40) throw new Error('名前を1〜40文字で入力してください。');
-      if (!event.slots.length) throw new Error('回答できる候補がまだありません。');
-      const answers = Object.fromEntries(event.slots.map(slot => {
-        const answer = draft.answers[slot.id];
-        if (Schedule.needsBuffer(slot, answer)) throw new Error('○の候補の前後の余裕を指定してください。');
-        const error = Schedule.answerError(slot, answer);
-        if (error) throw new Error(error);
-        const useOffsets = slot.end !== null && answer.mark !== 'no';
-        return [slot.id, { mark: answer.mark, from: useOffsets ? answer.from ?? 0 : 0, to: useOffsets ? answer.to ?? 0 : 0 }];
-      }));
-      const response = { uid, name, answers };
+      const response = makeResponse(event, uid, revision, draft);
       const index = responses.findIndex(item => item.uid === uid);
       if (index < 0) responses.push(response);
       else responses[index] = response;
@@ -146,31 +152,35 @@
     });
   }
 
+  function setFinal(event, responses, uid, selected) {
+    requireOwner(event, uid);
+    if (event.status === 'closed') throw new Error('この日程は確定済みです。');
+    const proposal = Schedule.proposals(event, responses).find(item =>
+      item.slot.id === selected.slot.id && item.start === selected.start && item.end === selected.end &&
+      item.people.length === selected.people.length && item.people.every(person => selected.people.some(old => old.uid === person.uid)));
+    if (!proposal) throw new Error('回答が更新されました。最新の提案を確認してください。');
+    event.final = { slotId: proposal.slot.id, date: proposal.slot.date, start: proposal.start, end: proposal.end, count: proposal.people.length };
+    event.status = 'closed';
+    event.locked = true;
+  }
+
+  function clearFinal(event, uid, expectedFinal) {
+    requireOwner(event, uid);
+    const final = event.final;
+    if (event.status !== 'closed' || !final) throw new Error('回答受付はすでに再開されています。');
+    if (final.slotId !== expectedFinal.slotId || final.start !== expectedFinal.start || final.end !== expectedFinal.end) {
+      throw new Error('確定日時が変わりました。最新の日時を確認してください。');
+    }
+    event.final = null;
+    event.status = 'open';
+  }
+
   function finalize(eventId, uid, selected) {
-    return withEvent(eventId, ({ event, responses }) => {
-      requireOwner(event, uid);
-      if (event.status === 'closed') throw new Error('この日程は確定済みです。');
-      const proposal = Schedule.proposals(event, responses).find(item =>
-        item.slot.id === selected.slot.id && item.start === selected.start && item.end === selected.end &&
-        item.people.map(person => person.uid).join() === selected.people.map(person => person.uid).join());
-      if (!proposal) throw new Error('回答が更新されました。最新の提案を確認してください。');
-      event.final = { slotId: proposal.slot.id, date: proposal.slot.date, start: proposal.start, end: proposal.end, count: proposal.people.length };
-      event.status = 'closed';
-      event.locked = true;
-    });
+    return withEvent(eventId, ({ event, responses }) => setFinal(event, responses, uid, selected));
   }
 
   function reopen(eventId, uid, expectedFinal) {
-    return withEvent(eventId, ({ event }) => {
-      requireOwner(event, uid);
-      const final = event.final;
-      if (event.status !== 'closed' || !final) throw new Error('回答受付はすでに再開されています。');
-      if (final.slotId !== expectedFinal.slotId || final.start !== expectedFinal.start || final.end !== expectedFinal.end) {
-        throw new Error('確定日時が変わりました。最新の日時を確認してください。');
-      }
-      event.final = null;
-      event.status = 'open';
-    });
+    return withEvent(eventId, ({ event }) => clearFinal(event, uid, expectedFinal));
   }
 
   window.addEventListener('storage', event => {
@@ -178,7 +188,9 @@
     if (event.key?.startsWith(eventPrefix)) notify(event.key.slice(eventPrefix.length));
   });
 
-  // Replace this interface with a Firestore adapter; the view never writes
+  globalThis.EventModel = { id, makeEvent, editEvent, makeResponse, setFinal, clearFinal };
+
+  // The view never writes
   // directly to browser storage or publishes a draft response.
   globalThis.DemoStore = {
     get, listOwned, create, update, submit, finalize, reopen, identity, id, sampleId, persistent,

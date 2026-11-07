@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function eventPath(id) {
+      return /databases/$(database)/documents/events/$(id);
+    }
+
+    function responsePath(id, uid) {
+      return /databases/$(database)/documents/events/$(id)/responses/$(uid);
+    }
+
+    function validCandidates(event) {
+      return event.title is string && event.title.size() > 0 && event.title.size() <= 60
+        && event.minimum is int && event.minimum >= 1 && event.minimum <= 1440
+        && event.slots is list && event.slotIds is list
+        && event.slots.size() == event.slotIds.size()
+        && event.slotIds.toSet().size() == event.slotIds.size();
+    }
+
+    function validNewEvent(id, event) {
+      return id.matches('^[0-9a-f]{24}$') && event.id == id && event.ownerUid == request.auth.uid
+        && event.keys().hasOnly(['id', 'ownerUid', 'title', 'minimum', 'slots', 'slotIds',
+          'status', 'locked', 'revision', 'final', 'responseCount', 'responseVersion', 'updatedAt'])
+        && validCandidates(event) && event.slots.size() == 0
+        && event.status == 'open' && event.locked == false && event.revision == 0
+        && event.final == null && event.responseCount == 0 && event.responseVersion == 0
+        && event.updatedAt == request.time;
+    }
+
+    function changesCandidates(before, after, keys) {
+      return before.ownerUid == request.auth.uid && before.status == 'open' && before.locked == false
+        && keys.hasOnly(['title', 'minimum', 'slots', 'slotIds', 'revision', 'updatedAt'])
+        && after.revision == before.revision + 1 && validCandidates(after);
+    }
+
+    function validFinal(event) {
+      let final = event.final;
+      return final is map && final.keys().hasOnly(['slotId', 'date', 'start', 'end', 'count'])
+        && final.slotId in event.slotIds
+        && final.date is string && final.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && final.start is int && final.end is int && final.start >= -120 && final.end < 1560
+        && final.end - final.start >= event.minimum
+        && final.count is int && final.count > 0 && final.count <= event.responseCount;
+    }
+
+    function changesFinal(before, after, keys) {
+      return before.ownerUid == request.auth.uid && before.locked == true
+        && keys.hasOnly(['status', 'final', 'updatedAt'])
+        && ((before.status == 'open' && after.status == 'closed' && validFinal(after))
+          || (before.status == 'closed' && after.status == 'open' && after.final == null));
+    }
+
+    function savesResponse(id, before, after, keys) {
+      let ownResponse = responsePath(id, request.auth.uid);
+      return before.status == 'open' && after.locked == true
+        && keys.hasOnly(['locked', 'responseCount', 'responseVersion', 'updatedAt'])
+        && after.responseVersion == before.responseVersion + 1
+        && after.responseCount == before.responseCount + (exists(ownResponse) ? 0 : 1)
+        && getAfter(ownResponse).data.updatedAt == request.time;
+    }
+
+    function validResponse(id, uid, response) {
+      let path = eventPath(id);
+      let event = get(path).data;
+      let next = getAfter(path).data;
+      return event.status == 'open' && event.slotIds.size() > 0
+        && next.status == 'open' && next.locked == true && next.revision == event.revision
+        && next.responseVersion == event.responseVersion + 1
+        && response.keys().hasOnly(['uid', 'name', 'answers', 'updatedAt'])
+        && response.uid == uid && response.name is string
+        && response.name.size() > 0 && response.name.size() <= 40
+        && response.answers is map && response.answers.keys().toSet() == event.slotIds.toSet()
+        && response.updatedAt == request.time;
+    }
+
+    match /events/{id} {
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow create: if signedIn() && validNewEvent(id, request.resource.data);
+      allow update: if signedIn() && request.resource.data.updatedAt == request.time
+        && (changesCandidates(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
+          || changesFinal(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
+          || savesResponse(id, resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys()));
+
+      match /responses/{uid} {
+        allow get, list: if signedIn() && exists(eventPath(id));
+        allow create, update: if signedIn() && request.auth.uid == uid && validResponse(id, uid, request.resource.data);
+      }
+    }
+  }
+}

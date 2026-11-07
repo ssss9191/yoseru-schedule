@@ -2,9 +2,8 @@
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const store = DemoStore;
-const baseUid = store.identity();
-const sampleId = store.sampleId;
+const localUid = DemoStore.identity();
+const sampleId = DemoStore.sampleId;
 const weekdays = [...'日月火水木金土'];
 const marks = { yes: ['○', '参加できる'], maybe: ['△', '時間しだい'], no: ['×', '参加できない'] };
 const dayMs = 86400000;
@@ -13,7 +12,11 @@ const dialog = $('#dialog');
 const drafts = new Map();
 let eventId;
 let record;
+let cloud;
+let store = DemoStore;
+let baseUid = localUid;
 let uid = baseUid;
+let stopWatching = () => {};
 let screen;
 let org;
 let simulated = [];
@@ -79,26 +82,56 @@ function resetOrganizer() {
 }
 
 function openEvent(id, initialView, replace = false) {
+  stopWatching();
+  stopWatching = () => {};
+  const local = DemoStore.get(id);
+  store = local || !cloud ? DemoStore : cloud;
   eventId = id;
-  record = store.get(id);
+  baseUid = store.identity();
   uid = baseUid;
-  simulated = record ? store.profiles(id) : [];
-  if (record) resetOrganizer();
-  screen = record && owner() ? initialView : 'answer';
+  screen = initialView;
   const state = { eventId, screen };
   if (replace) history.replaceState(state, '', shareURL());
   else history.pushState(state, '', shareURL());
-  render();
-  if (!replace) $('#view-title')?.focus();
+
+  function firstRender(next) {
+    record = next;
+    simulated = store === DemoStore && record ? DemoStore.profiles(id) : [];
+    if (record) resetOrganizer();
+    if (!record || !owner()) screen = 'answer';
+    history.replaceState({ eventId, screen }, '', shareURL());
+    render();
+    if (!replace) $('#view-title')?.focus();
+  }
+
+  if (store === DemoStore) {
+    firstRender(local);
+  } else {
+    record = null;
+    renderLoading('イベントを読み込み中…');
+    let first = true;
+    stopWatching = store.watchEvent(id, next => {
+      if (first) {
+        first = false;
+        firstRender(next);
+      } else refreshEvent(next);
+    }, error => {
+      if (first) renderLoading('共有イベントを読み込めませんでした');
+      toast(connectionError(error));
+    });
+  }
 }
 
 function openHome(replace = false) {
+  stopWatching();
+  stopWatching = () => {};
   eventId = null;
   record = null;
   screen = 'home';
   if (replace) history.replaceState({ screen }, '', shareURL());
   else history.pushState({ screen }, '', shareURL());
   render();
+  if (cloud) stopWatching = cloud.watchOwned(renderHome, error => toast(connectionError(error)));
   if (!replace) $('#view-title').focus();
 }
 
@@ -113,9 +146,25 @@ function template(name) {
   return $('#' + name + '-template').content.cloneNode(true);
 }
 
+function renderLoading(message) {
+  $('#event-header').hidden = true;
+  $('#views').hidden = true;
+  $('#go-home').removeAttribute('aria-current');
+  view.removeAttribute('aria-labelledby');
+  view.innerHTML = '<div class="panel view-heading" role="status">' + esc(message) + '</div>';
+}
+
+function connectionError(error) {
+  if (error.code === 'permission-denied') return 'この操作は許可されていません。共有設定を確認してください。';
+  if (error.code === 'unavailable') return '接続できません。通信を確認して、もう一度お試しください。';
+  return error.message;
+}
+
 function renderHome() {
   const content = template('home');
-  const events = store.listOwned(baseUid);
+  const events = [...(cloud?.listOwned() ?? []), ...DemoStore.listOwned(localUid)];
+  const updated = event => event.updatedAt?.toMillis?.() ?? event.updatedAt ?? 0;
+  events.sort((a, b) => updated(b.event) - updated(a.event));
   $('#home-count', content).textContent = events.length + '件';
   $('#home-empty', content).hidden = events.length > 0;
   const list = $('#home-events', content);
@@ -128,7 +177,10 @@ function renderHome() {
     const closed = event.status === 'closed';
     status.classList.toggle('closed', closed || !event.slots.length);
     status.textContent = closed ? '確定済み' : event.slots.length ? '受付中' : '準備中';
-    $('[data-event-summary]', item).textContent = '候補 ' + event.slots.length + '件 · 回答 ' + responses.length + '人';
+    const isShared = event.responseVersion !== undefined;
+    const mode = cloud ? (isShared ? '共有 · ' : 'ローカル · ') : '';
+    const count = event.responseCount ?? responses.length;
+    $('[data-event-summary]', item).textContent = mode + '候補 ' + event.slots.length + '件 · 回答 ' + count + '人';
     if (event.final) {
       const { date, start, end } = event.final;
       const final = $('[data-event-final]', item);
@@ -144,6 +196,9 @@ function render() {
   const header = $('#event-header');
   const nav = $('#views');
   const home = screen === 'home';
+  const shared = Boolean(cloud && (home || store === cloud));
+  $('#mode-label').textContent = shared ? '共有モード' : 'ローカルデモ';
+  $('#storage-note').textContent = shared ? '保存済みの回答を、同じイベントのURLで共有します' : 'デモの回答はこのブラウザに保存されます';
   const homeButton = $('#go-home');
   $('#new-event').hidden = home;
   header.hidden = home;
@@ -159,7 +214,9 @@ function render() {
   if (!record) {
     header.innerHTML = '<p class="eyebrow">ローカルデモ</p><h1>イベントが見つかりません</h1><p>このブラウザに保存されているイベントを開くか、回答入りデモをお試しください。</p>';
     nav.replaceChildren();
-    view.innerHTML = '<div class="panel">' + empty('イベントを開けません', '別の端末で作ったイベントは、Firebase接続後に共有できるようになります。') + '</div>';
+    const hint = shared ? 'イベントを作った人から、共有モードのリンクを受け取ってください。' :
+      'ローカルデモで作ったイベントは、作成したブラウザで開けます。';
+    view.innerHTML = '<div class="panel">' + empty('イベントを開けません', hint) + '</div>';
     view.removeAttribute('aria-labelledby');
     return;
   }
@@ -179,6 +236,7 @@ function render() {
     .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
     .concat(eventId === sampleId ? [['demo-a', '青木（例）'], ['demo-b', '佐藤（例）'], ['demo-c', '田中（例）']] : []);
   const profiles = $('#profile', content);
+  profiles.closest('.profile').hidden = shared;
   profiles.prepend(...options.map(([id, label]) => new Option(label, id)));
   profiles.value = uid;
   if (closed) {
@@ -587,7 +645,10 @@ function selectMark(button) {
 }
 
 function showShare() {
-  ask('イベントリンク', '<p>このイベントの回答と結果は同じURLで開きます。ローカルデモでは、保存したデータを同じブラウザで確認できます。</p>' +
+  const message = store === cloud
+    ? 'このURLを知っている人が、回答を登録し、保存済みの名前と回答を確認できます。'
+    : 'ローカルデモのイベントと回答は、作成したブラウザで確認できます。';
+  ask('イベントリンク', '<p>' + message + '</p>' +
     '<label>イベントのURL<input id="share-url" readonly value="' + esc(shareURL()) + '"></label>', 'copy', 'リンクをコピー');
 }
 
@@ -595,7 +656,10 @@ let pendingFinal;
 let pendingReopen;
 const actions = {
   home: () => { if (screen !== 'home') openHome(); },
-  'new-event': () => openEvent(store.create(baseUid), 'organizer'),
+  'new-event': async () => {
+    const destination = cloud || DemoStore;
+    openEvent(await destination.create(destination.identity()), 'organizer');
+  },
   'open-event': button => openEvent(button.dataset.eventId, 'organizer'),
   view: button => setScreen(button.dataset.key),
   share: showShare,
@@ -720,9 +784,10 @@ document.addEventListener('click', async evt => {
   try {
     await actions[action](button);
   } catch (error) {
-    if (action === 'save-answer') errorAt('#answer-error', error.message);
-    else if (['apply-edit', 'add-slots'].includes(action)) errorAt('#org-error', error.message);
-    else toast(error.message);
+    const message = connectionError(error);
+    if (action === 'save-answer') errorAt('#answer-error', message);
+    else if (['apply-edit', 'add-slots'].includes(action)) errorAt('#org-error', message);
+    else toast(message);
   } finally {
     busy = false;
   }
@@ -798,7 +863,7 @@ document.addEventListener('change', evt => {
   const field = evt.target;
   if (field.id === 'profile') {
     if (field.value === 'new') {
-      uid = store.addProfile(eventId);
+      uid = DemoStore.addProfile(eventId);
       simulated.push(uid);
     } else uid = field.value;
     setScreen(owner() && screen === 'organizer' ? 'organizer' : 'answer');
@@ -822,26 +887,28 @@ document.addEventListener('change', evt => {
   }
 });
 
-store.subscribe(id => {
-  if (screen === 'home') {
-    renderHome();
-    return;
-  }
-  if (id !== eventId) return;
+function refreshEvent(next) {
   const previous = record;
-  record = store.get(id);
-  // A save in another tab need not replace the participant's in-progress form.
+  record = next;
   if (screen === 'answer' && record && previous && record.event.status === previous.event.status &&
       record.event.revision === previous.event.revision && draft().dirty) {
     const count = $('#submitted-count');
     if (count) count.textContent = record.responses.length + ' 人回答済み';
     return;
   }
-  if (screen === 'organizer' && !busy && record?.event.revision !== previous?.event.revision) resetOrganizer();
+  if (screen === 'organizer' && record && !busy && record.event.revision !== previous?.event.revision) resetOrganizer();
   render();
+}
+
+DemoStore.subscribe(id => {
+  if (screen === 'home') {
+    renderHome();
+    return;
+  }
+  if (store === DemoStore && id === eventId) refreshEvent(DemoStore.get(id));
 });
 
-$('#sample').addEventListener('click', () => openEvent(sampleId, 'results'));
+$('#sample').addEventListener('click', () => { if (!busy) openEvent(sampleId, 'results'); });
 $('.skip').addEventListener('click', evt => {
   evt.preventDefault();
   $('#main').focus();
@@ -851,6 +918,24 @@ function restoreRoute() {
   if (id) openEvent(id, history.state?.screen || 'answer', true);
   else openHome(true);
 }
-window.addEventListener('popstate', restoreRoute);
-restoreRoute();
-if (!store.persistent) toast('ブラウザの保存機能が無効です。このタブを閉じるまで操作できます。');
+async function start() {
+  let failed = false;
+  if (globalThis.YOSERU_FIREBASE_CONFIG) {
+    const controls = [$('#go-home'), $('#new-event'), $('#sample')];
+    controls.forEach(control => { control.disabled = true; });
+    renderLoading('共有モードに接続中…');
+    try {
+      cloud = await FirebaseStore.connect(globalThis.YOSERU_FIREBASE_CONFIG);
+    } catch {
+      failed = true;
+    } finally {
+      controls.forEach(control => { control.disabled = false; });
+    }
+  }
+  window.addEventListener('popstate', restoreRoute);
+  restoreRoute();
+  if (failed) toast('Firebaseに接続できませんでした。ローカルデモを表示しています。');
+  else if (!DemoStore.persistent) toast('ブラウザの保存機能が無効です。このタブを閉じるまで操作できます。');
+}
+
+start();

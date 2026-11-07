@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="./style.css">
   <script defer src="./schedule.js"></script>
   <script defer src="./store.js"></script>
+  <script defer src="./firebase-config.js"></script>
+  <script defer src="./firebase-store.js"></script>
   <script defer src="./app.js"></script>
 </head>
 <body>
@@ -18,7 +20,7 @@
     <div class="shell top-inner">
       <div class="brand"><span class="brand-mark" aria-hidden="true">△</span><div><strong>よせる</strong><small>日程調整プロトタイプ</small></div></div>
       <div class="top-actions">
-        <span class="demo-tag"><i></i> ローカルデモ</span>
+        <span class="demo-tag"><i></i> <span id="mode-label">ローカルデモ</span></span>
         <button id="go-home" class="button ghost small" type="button" data-action="home">ホーム</button>
         <button id="sample" class="button ghost small" type="button">回答入りデモ</button>
         <button id="new-event" class="button ghost small" type="button" data-action="new-event">＋ 新しいイベント</button>
@@ -31,7 +33,7 @@
     <section id="view" aria-labelledby="view-title"></section>
     <noscript>このプロトタイプを操作するにはJavaScriptを有効にしてください。</noscript>
   </main>
-  <footer class="shell footer"><span>よせる · Webプログラミング課題2</span><span>デモの回答はこのブラウザに保存されます</span></footer>
+  <footer class="shell footer"><span>よせる · Webプログラミング課題2</span><span id="storage-note">デモの回答はこのブラウザに保存されます</span></footer>
   <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
