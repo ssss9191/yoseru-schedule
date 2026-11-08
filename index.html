@@ -83,6 +83,7 @@
         <span id="event-slot-count"></span>
         <span id="submitted-count"></span>
         <span id="event-minimum"></span>
+        <span id="event-minimum-people"></span>
       </div>
     </div>
     <div class="event-tools">
@@ -124,6 +125,12 @@
         最低開催時間
         <span class="unit-input">
           <input id="minimum" inputmode="numeric" maxlength="4" aria-label="最低開催時間（分）"><span>分</span>
+        </span>
+      </label>
+      <label>
+        最低参加人数
+        <span class="unit-input">
+          <input id="minimum-people" inputmode="numeric" maxlength="4" aria-label="最低参加人数（人）"><span>人</span>
         </span>
       </label>
       <button type="button" class="button secondary" data-action="settings">設定を保存</button>
@@ -281,13 +288,13 @@
     <section class="panel proposals">
       <div class="section-top">
         <div class="panel-heading"><span class="step">✦</span><h3>自動調整の提案</h3></div>
-        <span class="pill">最低 <span id="results-minimum"></span> 分</span>
+        <span class="pill">最低 <span id="results-minimum"></span> 分 · <span id="results-minimum-people"></span> 人</span>
       </div>
       <p class="hint">参加可能人数順に最大3案。終了時刻がない候補は集計表で確認できます。</p>
       <div id="no-proposals" class="empty" hidden>
         <strong>条件を満たす案なし</strong>
-        <p id="no-proposals-unmet">最低開催時間を満たす参加可能時間帯がありません。</p>
-        <p id="no-proposals-pending">回答が保存されると、最低開催時間を満たす時間帯を提案します。</p>
+        <p id="no-proposals-unmet">最低開催時間と最低参加人数を両方満たす時間帯がありません。</p>
+        <p id="no-proposals-pending">回答が集まると、設定した時間と人数を満たす案を提案します。</p>
       </div>
       <div class="proposal-list"></div>
     </section>

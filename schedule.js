@@ -2,6 +2,7 @@
   'use strict';
 
   const DAY = 1440;
+  const MAX_PEOPLE = 9999;
   const MARKS = ['yes', 'maybe', 'no'];
 
   function readClock(hour, minute) {
@@ -74,13 +75,16 @@
   }
 
   function proposals(event, responses) {
+    const minimumPeople = event.minimumPeople ?? 1;
+    if (responses.length < minimumPeople) return [];
     return event.slots.map(slot => bestForSlot(slot, responses, event.minimum))
-      .filter(Boolean).sort(compareProposals).slice(0, 3);
+      .filter(proposal => proposal && proposal.people.length >= minimumPeople)
+      .sort(compareProposals).slice(0, 3);
   }
 
   function slotOrder(a, b) {
     return a.date.localeCompare(b.date) || a.start - b.start || (a.end ?? DAY) - (b.end ?? DAY);
   }
 
-  globalThis.Schedule = { DAY, readClock, availability, needsBuffer, answerError, proposals, slotOrder };
+  globalThis.Schedule = { DAY, MAX_PEOPLE, readClock, availability, needsBuffer, answerError, proposals, slotOrder };
 })();

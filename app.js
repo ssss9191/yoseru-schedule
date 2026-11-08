@@ -77,6 +77,7 @@ function resetOrganizer() {
   org = {
     month: new Date(Date.UTC(initial.getUTCFullYear(), initial.getUTCMonth(), 1)),
     dates: new Set(), selected: new Set(), title: event().title, minimum: String(event().minimum),
+    minimumPeople: String(event().minimumPeople ?? 1),
     time: { sh: '18', sm: '00', eh: '20', em: '00' }, hasEnd: false, addDraft: null
   };
 }
@@ -231,6 +232,7 @@ function render() {
   $('#event-slot-count', content).textContent = event().slots.length + ' 候補';
   $('#submitted-count', content).textContent = record.responses.length + ' 人回答済み';
   $('#event-minimum', content).textContent = '最低 ' + event().minimum + ' 分';
+  $('#event-minimum-people', content).textContent = '最低 ' + (event().minimumPeople ?? 1) + ' 人';
 
   const options = [[baseUid, event().ownerUid === baseUid ? '主催者（自分）' : '自分']]
     .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
@@ -322,6 +324,7 @@ function renderOrganizer() {
   if (!closed) {
     $('#event-name', content).value = org.title;
     $('#minimum', content).value = org.minimum;
+    $('#minimum-people', content).value = org.minimumPeople;
     $('#calendar', content).innerHTML = renderCalendar();
     $('#date-count', content).textContent = org.dates.size;
     $('[data-action=clear-dates]', content).hidden = !org.dates.size;
@@ -494,6 +497,7 @@ function renderResults() {
   const proposals = Schedule.proposals(event(), record.responses);
   const responseCount = record.responses.length;
   $('#results-minimum', content).textContent = event().minimum;
+  $('#results-minimum-people', content).textContent = event().minimumPeople ?? 1;
   $('#no-proposals', content).hidden = proposals.length > 0;
   $('#no-proposals-unmet', content).hidden = !responseCount;
   $('#no-proposals-pending', content).hidden = Boolean(responseCount);
@@ -711,12 +715,17 @@ const actions = {
   settings: async () => {
     const title = org.title.trim();
     const minimum = +org.minimum;
+    const minimumPeople = +org.minimumPeople;
     if (!title) { $('#event-name').focus(); throw new Error('イベント名を入力してください。'); }
     if (!/^\d+$/.test(org.minimum) || minimum < 1 || minimum > Schedule.DAY) {
       $('#minimum').focus();
       throw new Error('最低開催時間は1〜1440分で入力してください。');
     }
-    await store.update(eventId, uid, event().revision, { title, minimum });
+    if (!/^\d+$/.test(org.minimumPeople) || minimumPeople < 1 || minimumPeople > Schedule.MAX_PEOPLE) {
+      $('#minimum-people').focus();
+      throw new Error('最低参加人数は1〜9999人で入力してください。');
+    }
+    await store.update(eventId, uid, event().revision, { title, minimum, minimumPeople });
     toast('イベント設定を保存しました。');
   },
   'add-slots': () => saveSlots(false),
@@ -850,6 +859,7 @@ view.addEventListener('input', evt => {
   }
   if (field.id === 'event-name') org.title = field.value;
   if (field.id === 'minimum') org.minimum = field.value;
+  if (field.id === 'minimum-people') org.minimumPeople = field.value;
   if (field.id === 'edit-date') org.editDate = field.value;
   if (field.id === 'answer-name') {
     const current = draft();

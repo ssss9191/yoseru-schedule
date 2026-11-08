@@ -125,8 +125,11 @@
     function update(id, uid, revision, changes) {
       return changeEvent(id, event => {
         model.editEvent(event, uid, revision, changes);
-        const { title, minimum, slots } = event;
-        return { title, minimum, slots, slotIds: slots.map(slot => slot.id), revision: event.revision };
+        const { title, minimum, minimumPeople, slots } = event;
+        return {
+          title, minimum, slots, slotIds: slots.map(slot => slot.id), revision: event.revision,
+          ...(minimumPeople === undefined ? {} : { minimumPeople })
+        };
       });
     }
 

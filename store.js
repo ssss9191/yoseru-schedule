@@ -48,7 +48,7 @@
 
   function makeEvent(eventId, ownerUid, title, slots) {
     return {
-      id: eventId, ownerUid, title, slots, minimum: 60, status: 'open',
+      id: eventId, ownerUid, title, slots, minimum: 60, minimumPeople: 1, status: 'open',
       locked: false, revision: 0, final: null, updatedAt: Date.now()
     };
   }
@@ -119,8 +119,13 @@
     if (event.status === 'closed') throw new Error('確定を取り消してから候補を編集してください。');
     if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
     if (event.locked && ((changes.title !== undefined && changes.title !== event.title) ||
-        (changes.minimum !== undefined && changes.minimum !== event.minimum))) {
-      throw new Error('回答受付が始まったため、イベント名と最低開催時間は編集できません。');
+        (changes.minimum !== undefined && changes.minimum !== event.minimum) ||
+        (changes.minimumPeople !== undefined && changes.minimumPeople !== (event.minimumPeople ?? 1)))) {
+      throw new Error('回答受付が始まったため、イベント名と開催条件は編集できません。');
+    }
+    if (changes.minimumPeople !== undefined && (!Number.isInteger(changes.minimumPeople) ||
+        changes.minimumPeople < 1 || changes.minimumPeople > Schedule.MAX_PEOPLE)) {
+      throw new Error('最低参加人数は1〜9999人で入力してください。');
     }
     if (changes.slots) {
       const previous = new Map(event.slots.map(slot => [slot.id, slot]));
