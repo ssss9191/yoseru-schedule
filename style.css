@@ -250,7 +250,8 @@ input[type=checkbox] { width: 17px; height: 17px; }
 .ticks { color: var(--muted); }
 .ticks small { font-size: .7rem; }
 .save-panel { position: sticky; top: 15px; background: var(--shade); border-block: 1px solid var(--line); padding: 11px; }
-.save-panel .button { width: 100%; margin-top: 9px; }
+.answer-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.save-panel .primary { width: 100%; margin-top: 9px; }
 .workspace input[aria-invalid=true]:not([type=range]) { background: var(--red-bg); border-color: var(--red); }
 .clock-entry:has(input[aria-invalid=true]), .choices[aria-invalid=true] { border-color: var(--red); }
 .answer-row.has-error, .answer-row.has-error .buffer, .editor-section.has-error { background: var(--red-bg); }
@@ -272,6 +273,7 @@ input[type=checkbox] { width: 17px; height: 17px; }
 .proposal-meta { display: block; font-size: .75rem; font-weight: 400; margin-top: 1px; }
 .proposal-count { color: var(--muted); }
 .proposal-count strong { font-size: 1.12rem; color: var(--ink); }
+.proposal-count small { display: block; font-size: .69rem; }
 .table-scroll { overflow: auto; border: 1px solid var(--line); }
 .table-scroll table { text-align: center; }
 .table-scroll th, .table-scroll td { min-width: 88px; max-width: 175px; }
@@ -352,9 +354,12 @@ dialog .actions { justify-content: end; }
   .combo-list { left: 0; right: auto; }
   .settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-fields > :first-child { grid-column: 1 / -1; }
-  .save-panel { position: static; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 10px; }
-  .save-panel .hint, .save-panel .error { grid-column: 1; margin: 0; }
-  .save-panel .button { grid-column: 2; grid-row: 1 / span 2; margin: 0; }
+  .save-panel { position: sticky; top: auto; bottom: 0; z-index: 3; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 8px; padding: 8px 9px calc(8px + env(safe-area-inset-bottom, 0px)); border: 1px solid var(--line); }
+  .answer-progress { font-size: .85rem; }
+  .answer-progress .button { padding-inline: 6px; }
+  .save-panel .hint, .save-panel .error { grid-column: 1 / -1; margin: 0; }
+  .save-panel .hint:not([data-validation]) { display: none; }
+  .save-panel .primary { grid-column: 2; grid-row: 1; margin: 0; padding-inline: 8px; }
 }
 @media (max-width: 460px) {
   .final-banner { padding: 12px; }

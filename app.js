@@ -674,11 +674,30 @@ function updateAnswerStatus() {
     if (missingError) firstError ??= $('[data-mark=yes]', group);
     if (timeError) firstError ??= (partialLimit ? invalidFields[0] : limitFields[0]) ?? timeFields[0] ?? $('[data-mark=yes]', group);
   });
-  $('#answer-count').textContent = filled + ' / ' + slots.length + ' 件に回答';
-  $('#answer-note').textContent = firstError ? '赤く表示された項目を確認してください。' :
+  const remaining = slots.length - filled;
+  const count = $('#answer-count');
+  const countText = remaining ? `あと${remaining}件` : `全${slots.length}件に回答済み`;
+  if (count.textContent !== countText) count.textContent = countText;
+  $('#next-unanswered').hidden = !remaining;
+  const note = $('#answer-note');
+  note.toggleAttribute('data-validation', Boolean(firstError));
+  note.textContent = firstError ? '赤く表示された項目を確認してください。' :
     current.dirty ? '入力途中の回答は、保存するまで一覧に表示されません。' :
     record.responses.some(response => response.uid === uid) ? '保存済みの回答を表示しています。' : '入力途中の回答は、保存するまで一覧に表示されません。';
   return firstError;
+}
+
+function nextUnanswered() {
+  const current = draft();
+  const slots = event().slots;
+  const index = slots.findIndex(slot => slot.id === current.lastJump);
+  const next = [...slots.slice(index + 1), ...slots.slice(0, index + 1)]
+    .find(slot => !current.answers[slot.id]?.mark);
+  if (!next) return;
+  current.lastJump = next.id;
+  const card = $('[data-answer="' + next.id + '"]', view);
+  card.scrollIntoView({ block: 'center' });
+  $('[data-mark=yes]', card).focus({ preventScroll: true });
 }
 
 function resultTable() {
@@ -701,6 +720,19 @@ function resultTable() {
     }).join('') + '</tbody></table></div>';
 }
 
+function proposalMessage(event, responses) {
+  const minimumPeople = event.minimumPeople ?? 1;
+  if (!event.slots.length) return ['候補日時がありません', '主催者が候補日時を登録すると、回答を集められます。'];
+  if (responses.length < minimumPeople) {
+    return ['回答待ち', `回答済みは${responses.length}人です。最低${minimumPeople}人まで、あと${minimumPeople - responses.length}人の回答が必要です。`];
+  }
+  const { maxPeople, maxMinutes } = Schedule.overlapLimits(event, responses);
+  if (maxPeople < minimumPeople) {
+    return ['参加人数が条件に届いていません', `最低${minimumPeople}人に対して、同じ時間に参加できるのは最大${maxPeople}人です。`];
+  }
+  return ['開催時間が条件に届いていません', `最低${event.minimum}分に対して、${minimumPeople}人が続けて参加できるのは最長${maxMinutes}分です。`];
+}
+
 function renderResults() {
   const content = template('results');
   const proposals = Schedule.proposals(event(), record.responses);
@@ -708,25 +740,26 @@ function renderResults() {
   $('#results-minimum', content).textContent = event().minimum;
   $('#results-minimum-people', content).textContent = event().minimumPeople ?? 1;
   $('#no-proposals', content).hidden = proposals.length > 0;
-  $('#no-proposals-unmet', content).hidden = !responseCount;
-  $('#no-proposals-pending', content).hidden = Boolean(responseCount);
+  if (!proposals.length) {
+    const [title, reason] = proposalMessage(event(), record.responses);
+    $('#no-proposals-title', content).textContent = title;
+    $('#no-proposals-reason', content).textContent = reason;
+  }
   $('.proposal-table', content).hidden = !proposals.length;
   const canFinalize = owner() && event().status === 'open';
   $('#proposal-action', content).hidden = !canFinalize;
 
   const cards = proposals.map((item, index) => {
     const card = template('proposal');
-    const originalYes = record.responses.filter(person => person.answers[item.slot.id]?.mark === 'yes').length;
     $('.proposal', card).classList.toggle('best', index === 0);
     $('.rank', card).textContent = index + 1;
     $('[data-source-time]', card).textContent = dateText(item.slot.date) + ' ' + candidateTime(item.slot.start, item.slot.end);
-    $('[data-original-yes]', card).textContent = originalYes;
+    $('[data-original-attending]', card).textContent = Schedule.originalAttendance(item.slot, record.responses) + '人';
     $('[data-proposed-date]', card).textContent = dateText(item.slot.date);
     $('[data-proposed-time]', card).textContent = candidateTime(item.start, item.end);
     $('[data-duration]', card).textContent = item.end === null ? '' : (item.end - item.start) + '分 · ';
     $('[data-people]', card).textContent = item.people.map(person => person.name).join('、');
     $('[data-attending]', card).textContent = item.people.length;
-    $('[data-total]', card).textContent = responseCount;
     const finalize = $('[data-action=finalize]', card);
     finalize.dataset.index = index;
     if (index === 0) finalize.classList.replace('secondary', 'primary');
@@ -1144,6 +1177,7 @@ const actions = {
     toast('イベントを削除しました。');
   },
   mark: selectMark,
+  'next-unanswered': nextUnanswered,
   'zero-buffer': button => {
     const card = button.closest('[data-answer]');
     const slot = event().slots.find(item => item.id === card.dataset.answer);

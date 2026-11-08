@@ -17,6 +17,20 @@
     return [slot.start + (answer.from ?? 0), end];
   }
 
+  function slotParticipants(slot, responses) {
+    return responses.flatMap(response => {
+      const interval = availability(slot, response.answers[slot.id]);
+      return interval ? [{ uid: response.uid, name: response.name, start: interval[0], end: interval[1] }] : [];
+    });
+  }
+
+  const presentAt = (person, start) => person.start <= start && (person.end === null || start < person.end);
+
+  function originalAttendance(slot, responses) {
+    return slotParticipants(slot, responses).filter(person => slot.end === null
+      ? presentAt(person, slot.start) : person.start <= slot.start && person.end >= slot.end).length;
+  }
+
   function answerError(slot, answer) {
     if (!MARKS.includes(answer?.mark)) return '○・△・×から選んでください。';
     if (answer.mark === 'no') return '';
@@ -42,10 +56,7 @@
   }
 
   function bestForOpenSlot(slot, responses) {
-    const people = responses.flatMap(response => {
-      const interval = availability(slot, response.answers[slot.id]);
-      return interval ? [{ uid: response.uid, name: response.name, start: interval[0], end: interval[1] }] : [];
-    });
+    const people = slotParticipants(slot, responses);
     const starts = new Set([slot.start]);
     for (const person of people) {
       starts.add(person.start);
@@ -53,7 +64,7 @@
     }
     let best = null;
     for (const start of starts) {
-      const attending = people.filter(person => person.start <= start && (person.end === null || start < person.end));
+      const attending = people.filter(person => presentAt(person, start));
       if (!attending.length) continue;
       const proposal = { slot, start, end: null, people: attending, shift: Math.abs(start - slot.start) };
       if (!best || compareProposals(proposal, best) < 0) best = proposal;
@@ -63,12 +74,7 @@
 
   function bestForSlot(slot, responses, minimum) {
     if (slot.end === null) return bestForOpenSlot(slot, responses);
-    const intervals = responses.flatMap(response => {
-      const interval = availability(slot, response.answers[slot.id]);
-      return interval && interval[1] - interval[0] >= minimum
-        ? [{ uid: response.uid, name: response.name, start: interval[0], end: interval[1] }]
-        : [];
-    });
+    const intervals = slotParticipants(slot, responses).filter(person => person.end - person.start >= minimum);
     if (!intervals.length) return null;
 
     const starts = new Set();
@@ -106,9 +112,28 @@
       .sort(compareProposals).slice(0, 3);
   }
 
+  function overlapLimits(event, responses) {
+    const minimumPeople = event.minimumPeople ?? 1;
+    let maxPeople = 0;
+    let maxMinutes = 0;
+    for (const slot of event.slots) {
+      const people = slotParticipants(slot, responses);
+      // A shared interval can start when one of its attendees becomes available.
+      for (const start of new Set(people.map(person => person.start))) {
+        const attending = people.filter(person => presentAt(person, start));
+        maxPeople = Math.max(maxPeople, attending.length);
+        if (slot.end !== null && attending.length >= minimumPeople) {
+          const ends = attending.map(person => person.end).sort((a, b) => b - a);
+          maxMinutes = Math.max(maxMinutes, ends[minimumPeople - 1] - start);
+        }
+      }
+    }
+    return { maxPeople, maxMinutes };
+  }
+
   function slotOrder(a, b) {
     return a.date.localeCompare(b.date) || a.start - b.start || (a.end ?? DAY) - (b.end ?? DAY);
   }
 
-  globalThis.Schedule = { DAY, MAX_PEOPLE, readClock, availability, answerError, proposals, slotOrder };
+  globalThis.Schedule = { DAY, MAX_PEOPLE, readClock, availability, answerError, proposals, originalAttendance, overlapLimits, slotOrder };
 })();

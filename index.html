@@ -7,12 +7,12 @@
   <meta name="theme-color" content="#f5f5f6">
   <title>よせあい | 日程調整</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css?v=compact-answers">
-  <script defer src="./schedule.js?v=organizer-draft"></script>
+  <link rel="stylesheet" href="./style.css?v=answer-progress">
+  <script defer src="./schedule.js?v=answer-progress"></script>
   <script defer src="./store.js?v=organizer-draft"></script>
   <script defer src="./firebase-config.js"></script>
   <script defer src="./firebase-store.js?v=list-delete"></script>
-  <script defer src="./app.js?v=yoseai"></script>
+  <script defer src="./app.js?v=answer-progress"></script>
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
@@ -388,11 +388,14 @@
           <ul class="answer-list"></ul>
         </section>
         <section class="save-panel" aria-label="回答の保存">
-          <strong id="answer-count"></strong>
-          <p id="answer-note" class="hint"></p>
-          <p id="answer-error" class="error" role="alert" hidden></p>
+          <div class="answer-progress">
+            <strong id="answer-count" role="status"></strong>
+            <button type="button" id="next-unanswered" class="button secondary small" data-action="next-unanswered">次の未回答へ</button>
+          </div>
           <button type="button" class="button primary" id="save-answer" data-action="save-answer"
             data-update-label="回答の変更を保存">回答を保存</button>
+          <p id="answer-note" class="hint"></p>
+          <p id="answer-error" class="error" role="alert" hidden></p>
         </section>
       </div>
     </div>
@@ -457,9 +460,8 @@
       </div>
       <p class="hint">参加可能人数順に最大3案。終了未定の候補は最低人数で判定し、開始時刻を提案します。</p>
       <div id="no-proposals" class="empty" hidden>
-        <strong>条件を満たす案なし</strong>
-        <p id="no-proposals-unmet">開催条件を満たす候補がありません。</p>
-        <p id="no-proposals-pending">回答が集まると、開催条件に合う案を提案します。</p>
+        <strong id="no-proposals-title"></strong>
+        <p id="no-proposals-reason"></p>
       </div>
       <table class="proposal-table" aria-labelledby="proposals-title">
         <thead><tr><th scope="col">順位</th><th scope="col">提案日時</th><th scope="col">参加可能</th><th scope="col" id="proposal-action" hidden>日程確定</th></tr></thead>
@@ -481,9 +483,9 @@
       <th scope="row" class="proposal-copy">
         <span data-proposed-date></span> <span class="numbers" data-proposed-time></span>
         <span class="hint proposal-meta"><span data-duration></span><span data-people></span></span>
-        <span class="hint proposal-meta">元の候補 <span data-source-time></span> · ○ <span data-original-yes></span>人</span>
+        <span class="hint proposal-meta">元の候補 <span data-source-time></span></span>
       </th>
-      <td class="proposal-count"><strong data-attending></strong> / <span data-total></span>人</td>
+      <td class="proposal-count"><span data-original-attending></span> → <strong data-attending></strong>人<small>元の候補 → 提案</small></td>
       <td class="proposal-action" hidden><button type="button" class="button secondary small" data-action="finalize">この案で確定</button></td>
     </tr>
   </template>
