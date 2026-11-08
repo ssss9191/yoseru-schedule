@@ -151,6 +151,7 @@ function renderLoading(message) {
   $('#event-header').hidden = true;
   $('#views').hidden = true;
   $('#go-home').removeAttribute('aria-current');
+  $('#sample').removeAttribute('aria-current');
   view.removeAttribute('aria-labelledby');
   view.innerHTML = '<div class="panel view-heading" role="status">' + esc(message) + '</div>';
 }
@@ -168,6 +169,7 @@ function renderHome() {
   events.sort((a, b) => updated(b.event) - updated(a.event));
   $('#home-count', content).textContent = events.length + '件';
   $('#home-empty', content).hidden = events.length > 0;
+  $('#home-columns', content).hidden = !events.length;
   const list = $('#home-events', content);
   list.hidden = !events.length;
   for (const { event, responses } of events) {
@@ -201,7 +203,9 @@ function render() {
   $('#mode-label').textContent = shared ? '共有モード' : 'ローカルデモ';
   $('#storage-note').textContent = shared ? '保存済みの回答を、同じイベントのURLで共有します' : 'デモの回答はこのブラウザに保存されます';
   const homeButton = $('#go-home');
-  $('#new-event').hidden = home;
+  const sampleButton = $('#sample');
+  if (!home && eventId === sampleId) sampleButton.setAttribute('aria-current', 'page');
+  else sampleButton.removeAttribute('aria-current');
   header.hidden = home;
   nav.hidden = home;
   if (home) {
@@ -213,7 +217,7 @@ function render() {
   }
   homeButton.removeAttribute('aria-current');
   if (!record) {
-    header.innerHTML = '<p class="eyebrow">ローカルデモ</p><h1>イベントが見つかりません</h1><p>このブラウザに保存されているイベントを開くか、回答入りデモをお試しください。</p>';
+    header.innerHTML = '<div><h1>イベントが見つかりません</h1><p>このブラウザに保存されているイベントを開くか、回答入りデモをお試しください。</p></div>';
     nav.replaceChildren();
     const hint = shared ? 'イベントを作った人から、共有モードのリンクを受け取ってください。' :
       'ローカルデモで作ったイベントは、作成したブラウザで開けます。';
@@ -318,8 +322,15 @@ function renderOrganizer() {
   const editing = org.selected.size > 0;
   $('#organizer-locked', content).hidden = !closed;
   $('#organizer-edit-note', content).hidden = closed || !event().locked;
-  $('.event-settings', content).hidden = closed || event().locked;
+  const settings = $('.event-settings', content);
+  settings.hidden = closed || event().locked;
+  settings.open = $('.event-settings', view)?.open ?? !slotCount;
   $('.organizer-grid', content).hidden = closed;
+  $('#calendar-section', content).hidden = editing;
+  $('#time-section', content).setAttribute('aria-labelledby', editing ? 'edit-time-title' : 'add-time-title');
+  const editorButton = $('#jump-to-editor', content);
+  editorButton.hidden = closed;
+  if (editing) editorButton.textContent = '日時を編集';
 
   if (!closed) {
     $('#event-name', content).value = org.title;
@@ -349,14 +360,11 @@ function renderOrganizer() {
     }
   }
 
-  if (closed) $('#slot-list-step', content).textContent = '✓';
   $('#registered-count', content).textContent = slotCount + '件';
   $('#registered-slots', content).innerHTML = slotList(!closed);
-  $('#select-all-slots', content).hidden = closed || !slotCount;
+  $('#slot-list-tools', content).hidden = closed || !slotCount;
   $('#all-slots', content).checked = slotCount > 0 && org.selected.size === slotCount;
-  $('.bulk', content).hidden = closed || !slotCount;
   $('#bulk-count', content).textContent = org.selected.size;
-  $('#edit-selection-hint', content).hidden = !editing;
   $('[data-action=delete-slots]', content).disabled = !org.selected.size;
   view.replaceChildren(content);
 }
@@ -501,7 +509,9 @@ function renderResults() {
   $('#no-proposals', content).hidden = proposals.length > 0;
   $('#no-proposals-unmet', content).hidden = !responseCount;
   $('#no-proposals-pending', content).hidden = Boolean(responseCount);
-  $('.proposal-list', content).hidden = !proposals.length;
+  $('.proposal-table', content).hidden = !proposals.length;
+  const canFinalize = owner() && event().status === 'open';
+  $('#proposal-action', content).hidden = !canFinalize;
 
   const cards = proposals.map((item, index) => {
     const card = template('proposal');
@@ -518,7 +528,7 @@ function renderResults() {
     $('[data-total]', card).textContent = responseCount;
     const finalize = $('[data-action=finalize]', card);
     finalize.dataset.index = index;
-    finalize.hidden = !owner() || event().status !== 'open';
+    finalize.closest('td').hidden = !canFinalize;
     return card;
   });
   $('.proposal-list', content).append(...cards);
@@ -684,6 +694,7 @@ const actions = {
   },
   'open-event': button => openEvent(button.dataset.eventId, 'organizer'),
   view: button => setScreen(button.dataset.key),
+  'focus-editor': () => $(org.selected.size ? '#edit-time-title' : '#calendar-title').focus(),
   share: showShare,
   'close-dialog': () => dialog.close(),
   copy: async () => {
@@ -951,7 +962,7 @@ function restoreRoute() {
 async function start() {
   let failed = false;
   if (globalThis.YOSERU_FIREBASE_CONFIG) {
-    const controls = [$('#go-home'), $('#new-event'), $('#sample')];
+    const controls = [$('#go-home'), $('#sample')];
     controls.forEach(control => { control.disabled = true; });
     renderLoading('共有モードに接続中…');
     try {

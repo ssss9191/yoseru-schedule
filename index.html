@@ -4,57 +4,61 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="○△×と参加可能な時間で日程を調整する、授業課題のプロトタイプ。">
-  <meta name="theme-color" content="#f3f3f3">
+  <meta name="theme-color" content="#f5f5f6">
   <title>よせる | 日程調整</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=workspace">
   <script defer src="./schedule.js"></script>
   <script defer src="./store.js"></script>
   <script defer src="./firebase-config.js"></script>
   <script defer src="./firebase-store.js"></script>
-  <script defer src="./app.js"></script>
+  <script defer src="./app.js?v=workspace"></script>
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
-  <header class="topbar">
-    <div class="shell top-inner">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">△</span><div><strong>よせる</strong><small>日程調整プロトタイプ</small></div></div>
-      <div class="top-actions">
-        <span class="demo-tag"><i></i> <span id="mode-label">ローカルデモ</span></span>
-        <button id="go-home" class="button ghost small" type="button" data-action="home">ホーム</button>
-        <button id="sample" class="button ghost small" type="button">回答入りデモ</button>
-        <button id="new-event" class="button ghost small" type="button" data-action="new-event">＋ 新しいイベント</button>
-      </div>
+  <div class="app-layout">
+    <header class="sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">△</span><div><strong>よせる</strong><small>日程調整</small></div></div>
+      <nav class="app-nav" aria-label="アプリのメニュー">
+        <button id="go-home" type="button" data-action="home">イベント一覧</button>
+        <button id="sample" type="button">回答入りデモ</button>
+      </nav>
+      <p class="mode"><span id="mode-label">ローカルデモ</span></p>
+    </header>
+    <div class="workspace">
+      <main id="main" class="shell" tabindex="-1">
+        <section id="event-header" class="event-header" aria-label="イベント概要"></section>
+        <nav id="views" class="views" aria-label="イベント内のメニュー"></nav>
+        <section id="view" aria-labelledby="view-title"></section>
+        <noscript>このプロトタイプを操作するにはJavaScriptを有効にしてください。</noscript>
+      </main>
+      <footer class="shell footer"><span>Webプログラミング課題2</span><span id="storage-note">デモの回答はこのブラウザに保存されます</span></footer>
     </div>
-  </header>
-  <main id="main" class="shell" tabindex="-1">
-    <section id="event-header" class="event-header" aria-label="イベント概要"></section>
-    <nav id="views" class="views" aria-label="画面切り替え"></nav>
-    <section id="view" aria-labelledby="view-title"></section>
-    <noscript>このプロトタイプを操作するにはJavaScriptを有効にしてください。</noscript>
-  </main>
-  <footer class="shell footer"><span>よせる · Webプログラミング課題2</span><span id="storage-note">デモの回答はこのブラウザに保存されます</span></footer>
+  </div>
   <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- 画面を編集する場所。JavaScriptが各テンプレートを表示し、idやdata属性で値を入れます。 -->
   <template id="home-template">
-    <header class="event-header home-header">
+    <header class="page-heading home-header">
       <div>
         <h1 id="view-title" tabindex="-1">イベント一覧</h1>
-        <p>イベントを作成したり、保存した日程調整を開き直したりできます。</p>
+        <p>作成したイベントの候補日時と回答を管理できます。</p>
       </div>
+      <button id="new-event" type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
     </header>
     <section aria-labelledby="home-list-title">
-      <div class="home-list-heading">
+      <div class="section-top list-heading">
         <h2 id="home-list-title">自分が作ったイベント</h2>
         <span class="pill" id="home-count"></span>
-        <button type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
+      </div>
+      <div class="home-columns" id="home-columns" aria-hidden="true" hidden>
+        <span>イベント名</span><span>状態</span><span>候補・回答</span><span>確定日時</span><span></span>
       </div>
       <ul id="home-events" class="home-events"></ul>
       <div id="home-empty" class="empty" hidden>
         <strong>イベントはまだありません</strong>
-        <p>「新しいイベント」から候補日時を登録できます。操作を試すなら、上の「回答入りデモ」を開いてください。</p>
+        <p>「新しいイベント」から候補日時を登録できます。操作を試すなら、メニューの「回答入りデモ」を開いてください。</p>
       </div>
     </section>
   </template>
@@ -62,10 +66,8 @@
   <template id="home-event-template">
     <li>
       <button type="button" class="home-event" data-action="open-event">
-        <span class="home-event-top">
-          <strong class="home-event-title" data-event-title></strong>
-          <span class="state" data-event-state></span>
-        </span>
+        <strong class="home-event-title" data-event-title></strong>
+        <span class="state" data-event-state></span>
         <span class="home-event-summary" data-event-summary></span>
         <span class="home-event-final" data-event-final hidden></span>
         <span class="home-event-open">開く <span aria-hidden="true">→</span></span>
@@ -75,9 +77,11 @@
 
   <template id="event-template">
     <div class="event-copy">
-      <h1 id="event-title"></h1>
-      <div class="meta">
+      <div class="event-title-line">
+        <h1 id="event-title"></h1>
         <span id="event-state" class="state"></span>
+      </div>
+      <div class="meta">
         <span id="event-slot-count"></span>
         <span id="submitted-count"></span>
         <span id="event-minimum"></span>
@@ -85,6 +89,7 @@
       </div>
     </div>
     <div class="event-tools">
+      <button type="button" class="button text small" data-action="new-event">＋ 新しいイベント</button>
       <button type="button" class="button secondary small" data-action="share">共有リンクを表示</button>
       <label class="profile">
         デモ操作
@@ -110,85 +115,84 @@
   <!-- 主催者画面 -->
   <template id="organizer-template">
     <header class="view-heading">
-      <p class="eyebrow">01 / 主催者</p>
       <h2 id="view-title" tabindex="-1">候補日時をつくる</h2>
       <p>カレンダーで日付を選び、同じ時間枠をまとめて追加できます。</p>
     </header>
 
     <p id="organizer-locked" class="notice" hidden>日程を確定済みです。候補を編集するには「確定を取り消す」で受付を再開してください。</p>
     <p id="organizer-edit-note" class="notice" hidden>追加・変更した枠には、新しく回答が必要です。ほかの枠への回答は引き継がれます。</p>
-    <section class="panel event-settings">
-      <label>イベント名<input id="event-name" maxlength="60"></label>
-      <label>
-        最低開催時間
-        <span class="unit-input">
-          <input id="minimum" inputmode="numeric" maxlength="4" aria-label="最低開催時間（分）"><span>分</span>
-        </span>
-      </label>
-      <label>
-        最低参加人数
-        <span class="unit-input">
-          <input id="minimum-people" inputmode="numeric" maxlength="4" aria-label="最低参加人数（人）"><span>人</span>
-        </span>
-      </label>
-      <button type="button" class="button secondary" data-action="settings">設定を保存</button>
-    </section>
-    <div class="organizer-grid">
-      <section class="panel">
-        <div class="panel-heading"><span class="step">1</span><h3>日付を選択</h3></div>
-        <p class="hint">日付を押して複数選択。曜日の見出しでその月の同じ曜日を一括選択できます。</p>
-        <div id="calendar"></div>
-        <div class="calendar-footer">
-          <span><strong id="date-count"></strong> 日を選択中</span>
-          <button type="button" class="button text small" data-action="clear-dates">選択をクリア</button>
+    <details class="event-settings">
+      <summary>イベント設定</summary>
+      <div class="settings-fields">
+        <label>イベント名<input id="event-name" maxlength="60"></label>
+        <label>
+          最低開催時間
+          <span class="unit-input">
+            <input id="minimum" inputmode="numeric" maxlength="4" aria-label="最低開催時間（分）"><span>分</span>
+          </span>
+        </label>
+        <label>
+          最低参加人数
+          <span class="unit-input">
+            <input id="minimum-people" inputmode="numeric" maxlength="4" aria-label="最低参加人数（人）"><span>人</span>
+          </span>
+        </label>
+        <button type="button" class="button secondary" data-action="settings">設定を保存</button>
+      </div>
+    </details>
+    <div class="organizer-workspace">
+      <section class="candidate-list" aria-labelledby="registered-title">
+        <div class="section-top list-heading">
+          <h3 id="registered-title">登録済みの候補 <span class="pill" id="registered-count"></span></h3>
+          <button id="jump-to-editor" type="button" class="button text small" data-action="focus-editor">日時を入力</button>
         </div>
-        <div class="selected-dates"></div>
+        <div id="slot-list-tools" class="section-top slot-list-tools" hidden>
+          <label class="check"><input type="checkbox" id="all-slots"> すべて選択</label>
+          <div class="actions bulk">
+            <span><span id="bulk-count"></span>件選択</span>
+            <button type="button" class="button danger small" data-action="delete-slots">選択分を削除</button>
+          </div>
+        </div>
+        <div id="registered-slots"></div>
       </section>
-      <section class="panel">
-        <div class="panel-heading">
-          <span class="step">2</span>
+      <div class="organizer-grid">
+        <section id="calendar-section" class="editor-section" aria-labelledby="calendar-title">
+          <h3 id="calendar-title" tabindex="-1">日付を選択</h3>
+          <p class="hint">日付を押して複数選択。曜日の見出しでその月の同じ曜日を一括選択できます。</p>
+          <div id="calendar"></div>
+          <div class="calendar-footer">
+            <span><strong id="date-count"></strong> 日を選択中</span>
+            <button type="button" class="button text small" data-action="clear-dates">選択をクリア</button>
+          </div>
+          <div class="selected-dates"></div>
+        </section>
+        <section id="time-section" class="editor-section" aria-labelledby="add-time-title">
           <h3 id="add-time-title">時間枠を指定</h3>
-          <h3 id="edit-time-title" hidden>選択した候補を編集</h3>
-        </div>
-        <label id="edit-date-row" class="edit-date" hidden>変更後の日付<input id="edit-date" type="date"></label>
-        <p class="hint">「選ぶ」で時と分を指定。分の候補は10分刻みで、数字は直接入力もできます。</p>
-        <div class="time-editor">
-          <div class="time-group">
-            <strong>開始</strong>
-            <div data-clock-field="s"></div>
+          <h3 id="edit-time-title" tabindex="-1" hidden>選択した候補を編集</h3>
+          <label id="edit-date-row" class="edit-date" hidden>変更後の日付<input id="edit-date" type="date"></label>
+          <p class="hint">「選ぶ」で時と分を指定。分の候補は10分刻みで、数字は直接入力もできます。</p>
+          <div class="time-editor">
+            <div class="time-group">
+              <strong>開始</strong>
+              <div data-clock-field="s"></div>
+            </div>
+            <div id="end-time" class="time-group">
+              <strong>終了</strong>
+              <div data-clock-field="e"></div>
+            </div>
           </div>
-          <span class="time-sep" aria-hidden="true">〜</span>
-          <div id="end-time" class="time-group">
-            <strong>終了</strong>
-            <div data-clock-field="e"></div>
+          <label class="check"><input id="has-end" type="checkbox"> 終了時刻を指定する</label>
+          <p id="add-time-hint" class="hint">同じ日付を選んだまま、時刻を変えて追加できます。</p>
+          <p id="edit-time-hint" class="hint" hidden><span id="edit-slot-count"></span>件の候補にこの時間を適用します。</p>
+          <p id="org-error" class="error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="button" class="button primary" data-action="add-slots">選択した日付に追加</button>
+            <button type="button" class="button primary" data-action="apply-edit" hidden>選択した候補に適用</button>
+            <button type="button" class="button text" data-action="cancel-edit" hidden>編集をやめる</button>
           </div>
-        </div>
-        <label class="check"><input id="has-end" type="checkbox"> 終了時刻を指定する</label>
-        <p id="add-time-hint" class="hint">同じ日付を選んだまま、時刻を変えて追加できます。</p>
-        <p id="edit-time-hint" class="hint" hidden><span id="edit-slot-count"></span>件の候補にこの時間を適用します。</p>
-        <p id="org-error" class="error" role="alert" hidden></p>
-        <div class="actions">
-          <button type="button" class="button primary" data-action="add-slots">選択した日付に追加</button>
-          <button type="button" class="button primary" data-action="apply-edit" hidden>選択した候補に適用</button>
-          <button type="button" class="button text" data-action="cancel-edit" hidden>編集をやめる</button>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
-    <section class="panel list-panel">
-      <div class="section-top">
-        <div class="panel-heading">
-          <span class="step" id="slot-list-step">3</span>
-          <h3>登録済みの候補</h3>
-          <span class="pill" id="registered-count"></span>
-        </div>
-        <label id="select-all-slots" class="check"><input type="checkbox" id="all-slots"> すべて選択</label>
-      </div>
-      <div id="registered-slots"></div>
-      <div class="actions bulk">
-        <span><span id="bulk-count"></span>件を選択中<span id="edit-selection-hint" hidden> · 上の時刻欄で編集</span></span>
-        <button type="button" class="button danger small" data-action="delete-slots">選択分を削除</button>
-      </div>
-    </section>
   </template>
 
   <!-- 時・分の直接入力欄と選択ボタン -->
@@ -209,10 +213,9 @@
     </div>
   </template>
 
-  <!-- 参加者画面と、候補ごとの回答カード -->
+  <!-- 参加者画面と、候補ごとの回答行 -->
   <template id="answer-template">
     <header class="view-heading">
-      <p class="eyebrow">02 / 参加者</p>
       <h2 id="view-title" tabindex="-1">自分の回答</h2>
       <p>各候補に○・△・×で回答できます。△なら、参加できる時間を指定してください。</p>
     </header>
@@ -224,30 +227,33 @@
       <div class="empty"><strong>候補日時の登録をお待ちください</strong><p>主催者が候補を追加すると、ここから回答できます。</p></div>
     </div>
     <div id="answer-form" hidden>
-      <div class="panel answer-name">
+      <div class="answer-name">
         <label>名前<input id="answer-name" maxlength="40" placeholder="例：佐藤"></label>
         <p class="hint">保存した名前と回答は、このイベントの回答一覧に表示されます。</p>
       </div>
-    <p id="answer-stale" class="notice" hidden>候補が更新されました。追加・変更された枠に回答してください。</p>
-      <div class="answer-list"></div>
-      <div class="panel save-panel">
-        <div>
+      <p id="answer-stale" class="notice" hidden>候補が更新されました。追加・変更された枠に回答してください。</p>
+      <div class="answer-workspace">
+        <section aria-label="候補ごとの回答">
+          <div class="answer-columns" aria-hidden="true"><span>候補日時</span><span>出欠</span></div>
+          <ul class="answer-list"></ul>
+        </section>
+        <section class="save-panel" aria-label="回答の保存">
           <strong id="answer-count"></strong>
           <p id="answer-note" class="hint"></p>
           <p id="answer-error" class="error" role="alert" hidden></p>
-        </div>
-        <button type="button" class="button primary" id="save-answer" data-action="save-answer"
-          data-update-label="回答の変更を保存">回答を保存</button>
+          <button type="button" class="button primary" id="save-answer" data-action="save-answer"
+            data-update-label="回答の変更を保存">回答を保存</button>
+        </section>
       </div>
     </div>
   </template>
 
   <template id="answer-card-template">
-    <article class="panel answer-card" data-answer>
+    <li class="answer-row" data-answer>
       <div class="answer-top">
         <div>
-          <p class="slot-date"></p>
-          <h3 class="numbers"><span data-slot-time></span><small class="pill" data-no-end>終了未定</small></h3>
+          <h3 class="slot-date"></h3>
+          <p class="numbers slot-time"><span data-slot-time></span><small class="pill" data-no-end>終了未定</small></p>
         </div>
         <div class="choices" role="group">
           <button type="button" class="yes" data-action="mark" data-mark="yes" aria-label="○ 参加できる"><strong>○</strong><small>参加できる</small></button>
@@ -263,7 +269,7 @@
         <p class="hint">余裕がある場合はスライダーで調整してください。</p>
       </div>
       <div class="buffer" data-maybe-buffer hidden></div>
-    </article>
+    </li>
   </template>
 
   <template id="time-compare-template">
@@ -279,13 +285,12 @@
   <!-- 結果画面と、提案1件分の表示 -->
   <template id="results-template">
     <header class="view-heading">
-      <p class="eyebrow">03 / 結果</p>
       <h2 id="view-title" tabindex="-1">結果・回答一覧</h2>
       <p>みんなの回答と、時間を調整した場合の参加可能人数を確認できます。</p>
     </header>
-    <section class="panel proposals">
+    <section class="results-section proposals" aria-labelledby="proposals-title">
       <div class="section-top">
-        <div class="panel-heading"><span class="step">✦</span><h3>自動調整の提案</h3></div>
+        <h3 id="proposals-title">自動調整の提案</h3>
         <span class="pill">最低 <span id="results-minimum"></span> 分 · <span id="results-minimum-people"></span> 人</span>
       </div>
       <p class="hint">参加可能人数順に最大3案。終了時刻がない候補は集計表で確認できます。</p>
@@ -294,11 +299,14 @@
         <p id="no-proposals-unmet">最低開催時間と最低参加人数を両方満たす時間帯がありません。</p>
         <p id="no-proposals-pending">回答が集まると、設定した時間と人数を満たす案を提案します。</p>
       </div>
-      <div class="proposal-list"></div>
+      <table class="proposal-table" aria-labelledby="proposals-title">
+        <thead><tr><th scope="col">順位</th><th scope="col">提案日時</th><th scope="col">参加可能</th><th scope="col" id="proposal-action" hidden>操作</th></tr></thead>
+        <tbody class="proposal-list"></tbody>
+      </table>
     </section>
-    <section class="panel results-table">
-      <div class="panel-heading">
-        <span class="step">▤</span><h3>みんなの回答</h3><span class="pill" id="results-response-count"></span>
+    <section class="results-section results-table" aria-labelledby="responses-title">
+      <div class="section-top">
+        <h3 id="responses-title">みんなの回答</h3><span class="pill" id="results-response-count"></span>
       </div>
       <p class="hint">記号の下の時刻は、保存された参加可能時間です。</p>
       <div id="results-answers"></div>
@@ -306,16 +314,16 @@
   </template>
 
   <template id="proposal-template">
-    <article class="proposal">
-      <div class="rank"></div>
-      <div class="proposal-copy">
-        <p class="hint">元の候補 <span data-source-time></span> · ○ <span data-original-yes></span>人</p>
-        <h4><span data-proposed-date></span> <span class="numbers" data-proposed-time></span></h4>
-        <p class="hint"><span data-duration></span>分 · <span data-people></span></p>
-      </div>
-      <div class="proposal-count"><strong data-attending></strong> / <span data-total></span>人</div>
-      <button type="button" class="button secondary small" data-action="finalize">この案で確定</button>
-    </article>
+    <tr class="proposal">
+      <td class="rank"></td>
+      <th scope="row" class="proposal-copy">
+        <span data-proposed-date></span> <span class="numbers" data-proposed-time></span>
+        <span class="hint proposal-meta"><span data-duration></span>分 · <span data-people></span></span>
+        <span class="hint proposal-meta">元の候補 <span data-source-time></span> · ○ <span data-original-yes></span>人</span>
+      </th>
+      <td class="proposal-count"><strong data-attending></strong> / <span data-total></span>人</td>
+      <td class="proposal-action" hidden><button type="button" class="button secondary small" data-action="finalize">この案で確定</button></td>
+    </tr>
   </template>
 </body>
 </html>
