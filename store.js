@@ -24,6 +24,29 @@
     else cache.set(key, json);
   }
 
+  function remove(key) {
+    if (persistent) localStorage.removeItem(prefix + key);
+    else cache.delete(key);
+  }
+
+  function keysStartingWith(start) {
+    const keys = persistent
+      ? Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+        .filter(key => key?.startsWith(prefix)).map(key => key.slice(prefix.length))
+      : [...cache.keys()];
+    return keys.filter(key => key.startsWith(start));
+  }
+
+  function listReferences(kind, uid) {
+    const start = `${kind}.${uid}.`;
+    return keysStartingWith(start).map(key => ({ id: key.slice(start.length), title: read(key) }));
+  }
+
+  function rememberReference(kind, uid, eventId, title) {
+    const key = `${kind}.${uid}.${eventId}`;
+    if (read(key) !== title) write(key, title);
+  }
+
   function id() {
     return [...crypto.getRandomValues(new Uint8Array(12))].map(byte => byte.toString(16).padStart(2, '0')).join('');
   }
@@ -75,11 +98,7 @@
   }
 
   function listOwned(uid) {
-    const keys = persistent
-      ? Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
-        .filter(key => key?.startsWith(prefix)).map(key => key.slice(prefix.length))
-      : [...cache.keys()];
-    return keys.filter(key => key.startsWith('event.') && key !== `event.${sampleId}`)
+    return keysStartingWith('event.').filter(key => key !== `event.${sampleId}`)
       .map(key => read(key))
       .filter(record => record?.event?.ownerUid === uid)
       .sort((a, b) => (b.event.updatedAt ?? 0) - (a.event.updatedAt ?? 0) ||
@@ -114,8 +133,20 @@
     return event.id;
   }
 
-  function editEvent(event, uid, revision, changes) {
+  function editEvent(event, uid, revision, changes, expectedMemo) {
     requireOwner(event, uid);
+    if (changes.memo !== undefined) {
+      if (typeof changes.memo !== 'string' || changes.memo.length > 500) {
+        throw new Error('イベント概要は500文字以内で入力してください。');
+      }
+      if (expectedMemo !== undefined && (event.memo ?? '') !== expectedMemo) {
+        throw new Error('イベント概要が更新されました。開き直して内容を確認してください。');
+      }
+      if (Object.keys(changes).length === 1) {
+        event.memo = changes.memo;
+        return;
+      }
+    }
     if (event.status === 'closed') throw new Error('確定を取り消してから候補を編集してください。');
     if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
     if (event.locked && ((changes.title !== undefined && changes.title !== event.title) ||
@@ -147,7 +178,6 @@
     if (!event.slots.length) throw new Error('回答できる候補がまだありません。');
     const answers = Object.fromEntries(event.slots.map(slot => {
       const answer = draft.answers[slot.id];
-      if (Schedule.needsBuffer(slot, answer)) throw new Error('○の候補の前後の余裕を指定してください。');
       const error = Schedule.answerError(slot, answer);
       if (error) throw new Error(error);
       const useOffsets = slot.end !== null && answer.mark !== 'no';
@@ -156,8 +186,8 @@
     return { uid, name, answers };
   }
 
-  function update(eventId, uid, revision, changes) {
-    return withEvent(eventId, ({ event }) => editEvent(event, uid, revision, changes));
+  function update(eventId, uid, revision, changes, expectedMemo) {
+    return withEvent(eventId, ({ event }) => editEvent(event, uid, revision, changes, expectedMemo));
   }
 
   function submit(eventId, uid, revision, draft) {
@@ -212,6 +242,12 @@
   // directly to browser storage or publishes a draft response.
   globalThis.DemoStore = {
     get, listOwned, create, update, submit, finalize, reopen, identity, id, sampleId, persistent,
+    listPinned: uid => listReferences('pin', uid),
+    isPinned: (uid, eventId) => read(`pin.${uid}.${eventId}`) !== null,
+    pin: (uid, eventId, title) => rememberReference('pin', uid, eventId, title),
+    unpin: (uid, eventId) => remove(`pin.${uid}.${eventId}`),
+    listJoined: uid => listReferences('joined', uid),
+    rememberJoined: (uid, eventId, title) => rememberReference('joined', uid, eventId, title),
     profiles(eventId) { return read('profiles.' + eventId) ?? []; },
     addProfile(eventId) {
       const uid = id();

@@ -13,9 +13,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/events/$(id)/responses/$(uid);
     }
 
+    function validMemo(event) {
+      let memo = event.get('memo', '');
+      return memo is string && memo.size() <= 500;
+    }
+
     function validCandidates(event) {
       let minimumPeople = event.get('minimumPeople', 1);
-      return event.title is string && event.title.size() > 0 && event.title.size() <= 60
+      return validMemo(event) && event.title is string && event.title.size() > 0 && event.title.size() <= 60
         && event.minimum is int && event.minimum >= 1 && event.minimum <= 1440
         && minimumPeople is int && minimumPeople >= 1 && minimumPeople <= 9999
         && event.slots is list && event.slotIds is list
@@ -25,7 +30,7 @@ service cloud.firestore {
 
     function validNewEvent(id, event) {
       return id.matches('^[0-9a-f]{24}$') && event.id == id && event.ownerUid == request.auth.uid
-        && event.keys().hasOnly(['id', 'ownerUid', 'title', 'minimum', 'minimumPeople', 'slots', 'slotIds',
+        && event.keys().hasOnly(['id', 'ownerUid', 'title', 'memo', 'minimum', 'minimumPeople', 'slots', 'slotIds',
           'status', 'locked', 'revision', 'final', 'responseCount', 'responseVersion', 'updatedAt'])
         && validCandidates(event) && event.slots.size() == 0
         && event.status == 'open' && event.locked == false && event.revision == 0
@@ -35,9 +40,13 @@ service cloud.firestore {
 
     function changesCandidates(before, after, keys) {
       return before.ownerUid == request.auth.uid && before.status == 'open'
-        && keys.hasOnly(['title', 'minimum', 'minimumPeople', 'slots', 'slotIds', 'revision', 'updatedAt'])
+        && keys.hasOnly(['title', 'memo', 'minimum', 'minimumPeople', 'slots', 'slotIds', 'revision', 'updatedAt'])
         && (!before.locked || !keys.hasAny(['title', 'minimum', 'minimumPeople']))
         && after.revision == before.revision + 1 && validCandidates(after);
+    }
+
+    function changesMemo(before, after, keys) {
+      return before.ownerUid == request.auth.uid && keys.hasOnly(['memo', 'updatedAt']) && validMemo(after);
     }
 
     function validFinal(event) {
@@ -86,6 +95,7 @@ service cloud.firestore {
       allow create: if signedIn() && validNewEvent(id, request.resource.data);
       allow update: if signedIn() && request.resource.data.updatedAt == request.time
         && (changesCandidates(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
+          || changesMemo(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
           || changesFinal(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
           || savesResponse(id, resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys()));
 

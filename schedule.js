@@ -16,10 +16,6 @@
     return [slot.start + (answer.from ?? 0), slot.end + (answer.to ?? 0)];
   }
 
-  function needsBuffer(slot, answer) {
-    return slot.end !== null && answer?.mark === 'yes' && answer.from == null && answer.to == null;
-  }
-
   function answerError(slot, answer) {
     if (!MARKS.includes(answer?.mark)) return '○・△・×から選んでください。';
     if (slot.end === null || answer.mark === 'no') return '';
@@ -86,5 +82,5 @@
     return a.date.localeCompare(b.date) || a.start - b.start || (a.end ?? DAY) - (b.end ?? DAY);
   }
 
-  globalThis.Schedule = { DAY, MAX_PEOPLE, readClock, availability, needsBuffer, answerError, proposals, slotOrder };
+  globalThis.Schedule = { DAY, MAX_PEOPLE, readClock, availability, answerError, proposals, slotOrder };
 })();

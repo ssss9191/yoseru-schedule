@@ -74,15 +74,17 @@ function eventFromURL() {
 
 function resetOrganizer() {
   const initial = dateUTC(event().slots[0]?.date || today());
+  const memo = event().memo ?? '';
   org = {
     month: new Date(Date.UTC(initial.getUTCFullYear(), initial.getUTCMonth(), 1)),
     dates: new Set(), selected: new Set(), title: event().title, minimum: String(event().minimum),
-    minimumPeople: String(event().minimumPeople ?? 1),
+    minimumPeople: String(event().minimumPeople ?? 1), memo, savedMemo: memo,
     time: { sh: '18', sm: '00', eh: '20', em: '00' }, hasEnd: false, addDraft: null
   };
 }
 
 function openEvent(id, initialView, replace = false) {
+  closeMenu();
   stopWatching();
   stopWatching = () => {};
   const local = DemoStore.get(id);
@@ -99,6 +101,7 @@ function openEvent(id, initialView, replace = false) {
     record = next;
     simulated = store === DemoStore && record ? DemoStore.profiles(id) : [];
     if (record) resetOrganizer();
+    rememberPersonalEvent();
     if (!record || !owner()) screen = 'answer';
     history.replaceState({ eventId, screen }, '', shareURL());
     render();
@@ -124,6 +127,7 @@ function openEvent(id, initialView, replace = false) {
 }
 
 function openHome(replace = false) {
+  closeMenu();
   stopWatching();
   stopWatching = () => {};
   eventId = null;
@@ -147,11 +151,19 @@ function template(name) {
   return $('#' + name + '-template').content.cloneNode(true);
 }
 
+function closeMenu(restoreFocus = false) {
+  const toggle = $('#menu-toggle');
+  if (toggle.getAttribute('aria-expanded') !== 'true') return;
+  toggle.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) toggle.focus();
+}
+
 function renderLoading(message) {
   $('#event-header').hidden = true;
   $('#views').hidden = true;
   $('#go-home').removeAttribute('aria-current');
   $('#sample').removeAttribute('aria-current');
+  renderPins();
   view.removeAttribute('aria-labelledby');
   view.innerHTML = '<div class="panel view-heading" role="status">' + esc(message) + '</div>';
 }
@@ -160,6 +172,55 @@ function connectionError(error) {
   if (error.code === 'permission-denied') return 'この操作は許可されていません。共有設定を確認してください。';
   if (error.code === 'unavailable') return '接続できません。通信を確認して、もう一度お試しください。';
   return error.message;
+}
+
+function personalIdentities() {
+  return new Set(cloud ? [localUid, cloud.identity()] : [localUid]);
+}
+
+function rememberPersonalEvent(submitted = false) {
+  if (!record) return;
+  const { id, title, ownerUid } = event();
+  try {
+    if (DemoStore.isPinned(baseUid, id)) DemoStore.pin(baseUid, id, title);
+    if (id !== sampleId && ownerUid !== baseUid && (submitted || record.responses.some(response => response.uid === baseUid))) {
+      DemoStore.rememberJoined(baseUid, id, title);
+    }
+  } catch {
+    toast('このブラウザーのイベント一覧を更新できませんでした。');
+  }
+}
+
+function renderEventMemo(root) {
+  const memo = event().memo ?? '';
+  $('#event-overview', root).hidden = !memo;
+  $('#event-memo', root).textContent = memo;
+}
+
+function updatePinButton(button) {
+  const pinned = DemoStore.isPinned(baseUid, eventId);
+  button.setAttribute('aria-pressed', pinned);
+  button.querySelector('span').textContent = pinned ? '★' : '☆';
+}
+
+function renderPins() {
+  const items = [];
+  for (const identity of personalIdentities()) {
+    for (const { id, title } of DemoStore.listPinned(identity)) {
+      const item = template('pin');
+      const open = $('.pinned-open', item);
+      open.dataset.eventId = id;
+      open.textContent = title;
+      if (id === eventId) open.setAttribute('aria-current', 'page');
+      const remove = $('.pinned-remove', item);
+      remove.dataset.eventId = id;
+      remove.dataset.identity = identity;
+      remove.setAttribute('aria-label', `「${title}」のピン留めを外す`);
+      items.push(item);
+    }
+  }
+  $('#pinned-events').replaceChildren(...items);
+  $('#pinned-empty').hidden = items.length > 0;
 }
 
 function renderHome() {
@@ -192,6 +253,23 @@ function renderHome() {
     }
     list.append(item);
   }
+  const ownedIds = new Set(events.map(({ event }) => event.id));
+  const joined = new Map();
+  for (const identity of personalIdentities()) {
+    for (const { id, title } of DemoStore.listJoined(identity)) {
+      if (!ownedIds.has(id)) joined.set(id, title);
+    }
+  }
+  const joinedList = $('#joined-events', content);
+  for (const [id, title] of joined) {
+    const item = template('joined-event');
+    $('[data-action=open-event]', item).dataset.eventId = id;
+    $('[data-event-title]', item).textContent = title;
+    joinedList.append(item);
+  }
+  $('#joined-count', content).textContent = joined.size + '件';
+  $('#joined-empty', content).hidden = joined.size > 0;
+  joinedList.hidden = !joined.size;
   view.replaceChildren(content);
 }
 
@@ -199,6 +277,7 @@ function render() {
   const header = $('#event-header');
   const nav = $('#views');
   const home = screen === 'home';
+  renderPins();
   const shared = Boolean(cloud && (home || store === cloud));
   $('#mode-label').textContent = shared ? '共有モード' : 'ローカルデモ';
   $('#storage-note').textContent = shared ? '保存済みの回答を、同じイベントのURLで共有します' : 'デモの回答はこのブラウザに保存されます';
@@ -237,6 +316,8 @@ function render() {
   $('#submitted-count', content).textContent = record.responses.length + ' 人回答済み';
   $('#event-minimum', content).textContent = '最低 ' + event().minimum + ' 分';
   $('#event-minimum-people', content).textContent = '最低 ' + (event().minimumPeople ?? 1) + ' 人';
+  updatePinButton($('[data-action=pin-event]', content));
+  renderEventMemo(content);
 
   const options = [[baseUid, event().ownerUid === baseUid ? '主催者（自分）' : '自分']]
     .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
@@ -323,8 +404,15 @@ function renderOrganizer() {
   $('#organizer-locked', content).hidden = !closed;
   $('#organizer-edit-note', content).hidden = closed || !event().locked;
   const settings = $('.event-settings', content);
+  const previousSettings = $('.event-settings', view);
+  settings.dataset.eventId = eventId;
   settings.hidden = closed || event().locked;
-  settings.open = $('.event-settings', view)?.open ?? !slotCount;
+  settings.open = previousSettings?.dataset.eventId === eventId ? previousSettings.open : !slotCount;
+  $('#organizer-memo', content).value = org.memo;
+  if (settings.hidden) {
+    $('[data-action=settings]', content).textContent = 'メモを保存';
+    $('#settings-save-help', content).textContent = 'このイベントの概要を保存します。';
+  }
   $('.organizer-grid', content).hidden = closed;
   $('#calendar-section', content).hidden = editing;
   $('#time-section', content).setAttribute('aria-labelledby', editing ? 'edit-time-title' : 'add-time-title');
@@ -358,7 +446,9 @@ function renderOrganizer() {
     for (const selector of ['#edit-time-title', '#edit-time-hint', '[data-action=apply-edit]', '[data-action=cancel-edit]']) {
       $(selector, content).hidden = !editing;
     }
+    if (org.checkedSlots) checkSlotInputs(content);
   }
+  if (!settings.hidden && org.checkedSettings) checkSettings(content);
 
   $('#registered-count', content).textContent = slotCount + '件';
   $('#registered-slots', content).innerHTML = slotList(!closed);
@@ -405,19 +495,8 @@ function answerControls(slot, answer) {
   $('[data-original]', content).textContent = date + ' ' + rangeText(slot.start, slot.end);
   $('[data-available]', content).textContent = date + ' ' + rangeText(...Schedule.availability(slot, answer));
   $('.sliders', content).innerHTML = slider(slot, 'from', answer) + slider(slot, 'to', answer);
-  const error = Schedule.answerError(slot, answer);
-  const message = $('[data-slot-error]', content);
-  message.hidden = !error;
-  message.textContent = error;
+  $('[data-slot-error]', content).id = 'time-error-' + slot.id;
   return content;
-}
-
-function updateBufferButton(card, slot, answer) {
-  const button = $('[data-action=zero-buffer]', card);
-  if (button) {
-    const zeroSelected = !Schedule.needsBuffer(slot, answer) && !answer.from && !answer.to;
-    button.setAttribute('aria-pressed', String(zeroSelected));
-  }
 }
 
 function answerCard(slot, answer) {
@@ -427,6 +506,7 @@ function answerCard(slot, answer) {
   $('.slot-date', content).textContent = date;
   $('[data-slot-time]', content).textContent = rangeText(slot.start, slot.end);
   $('[data-no-end]', content).hidden = slot.end !== null;
+  $('[data-answer-required]', content).id = 'answer-required-' + slot.id;
   $('.choices', content).setAttribute('aria-label', date + ' ' + minutesText(slot.start) + ' の回答');
   for (const choice of $$('[data-mark]', content)) {
     choice.setAttribute('aria-pressed', String(answer?.mark === choice.dataset.mark));
@@ -436,7 +516,6 @@ function answerCard(slot, answer) {
   const maybeBuffer = $('[data-maybe-buffer]', content);
   if (slot.end !== null && answer?.mark === 'yes') {
     yesBuffer.hidden = false;
-    updateBufferButton(yesBuffer, slot, answer);
     yesBuffer.append(answerControls(slot, answer));
   } else yesBuffer.remove();
   if (slot.end !== null && answer?.mark === 'maybe') {
@@ -448,6 +527,8 @@ function answerCard(slot, answer) {
 
 function renderAnswer() {
   const content = template('answer');
+  $('#answer-minimum', content).textContent = event().minimum;
+  $('#answer-minimum-people', content).textContent = event().minimumPeople ?? 1;
   const closed = event().status === 'closed';
   if (closed || !event().slots.length) {
     $(closed ? '#answer-closed' : '#answer-empty', content).hidden = false;
@@ -469,15 +550,34 @@ function renderAnswer() {
 function updateAnswerStatus() {
   const current = draft();
   const slots = event().slots;
-  const pending = slots.filter(slot => Schedule.needsBuffer(slot, current.answers[slot.id])).length;
-  const filled = slots.filter(slot => current.answers[slot.id]?.mark).length - pending;
-  const invalid = slots.some(slot => current.answers[slot.id]?.mark && Schedule.answerError(slot, current.answers[slot.id]));
+  const name = $('#answer-name');
+  const missingName = current.checked && !current.name.trim();
+  showInputError([name], $('#answer-name-error'), missingName ? '名前を入力してください。' : '');
+  let firstError = missingName ? name : null;
+  let filled = 0;
+  const cards = $$('[data-answer]', view);
+  slots.forEach((slot, index) => {
+    const card = cards[index];
+    const answer = current.answers[slot.id];
+    const error = Schedule.answerError(slot, answer);
+    const missing = !answer?.mark;
+    if (!missing) filled++;
+    const missingError = missing && current.checked ? error : '';
+    const timeError = missing ? '' : error;
+    const group = $('.choices', card);
+    showInputError([group], $('[data-answer-required]', card), missingError);
+    const timing = $('[data-slot-error]', card);
+    const sliders = $$('[data-offset]', card);
+    if (timing) showInputError(sliders, timing, timeError);
+    card.classList.toggle('has-error', Boolean(missingError || timeError));
+    if (missingError) firstError ??= $('[data-mark=yes]', group);
+    if (timeError) firstError ??= sliders[0] ?? $('[data-mark=yes]', group);
+  });
   $('#answer-count').textContent = filled + ' / ' + slots.length + ' 件に回答';
-  $('#answer-note').textContent = invalid ? '赤字の時刻を直すと保存できます。' :
-    pending ? '○の候補は、前後の余裕を指定すると保存できます。' :
+  $('#answer-note').textContent = firstError ? '赤く表示された項目を確認してください。' :
     current.dirty ? '入力途中の回答は、保存するまで一覧に表示されません。' :
     record.responses.some(response => response.uid === uid) ? '保存済みの回答を表示しています。' : '入力途中の回答は、保存するまで一覧に表示されません。';
-  $('#save-answer').disabled = invalid;
+  return firstError;
 }
 
 function resultTable() {
@@ -544,6 +644,36 @@ function errorAt(selector, message) {
   el.textContent = message;
 }
 
+function showInputError(fields, error, message, invalidFields = fields) {
+  if (error.textContent !== message) error.textContent = message;
+  error.hidden = !message;
+  for (const field of fields) {
+    if (message && invalidFields.includes(field)) {
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-describedby', error.id);
+    } else if (field.getAttribute('aria-describedby') === error.id) {
+      field.removeAttribute('aria-invalid');
+      field.removeAttribute('aria-describedby');
+    }
+  }
+}
+
+function checkSettings(root = view) {
+  const validNumber = (text, max) => /^\d+$/.test(text) && +text >= 1 && +text <= max;
+  const checks = [
+    ['event-name', org.title.trim(), 'イベント名を入力してください。'],
+    ['minimum', validNumber(org.minimum, Schedule.DAY), '1〜1440分で入力してください。'],
+    ['minimum-people', validNumber(org.minimumPeople, Schedule.MAX_PEOPLE), '1〜9999人で入力してください。']
+  ];
+  let firstError = null;
+  for (const [id, valid, message] of checks) {
+    const field = $('#' + id, root);
+    showInputError([field], $('#' + id + '-error', root), valid ? '' : message);
+    if (!valid) firstError ??= field;
+  }
+  return firstError;
+}
+
 function ask(title, content, action, button) {
   dialog.innerHTML = '<h2 id="dialog-title">' + title + '</h2>' + content + '<div class="actions">' +
     btn('閉じる', 'close-dialog', 'secondary') + (action ? btn(button, action, 'primary') : '') + '</div>';
@@ -600,6 +730,7 @@ function setClock(button) {
   org.time[key] = value;
   const input = $('#' + key);
   input.value = value;
+  if (org.checkedSlots) checkSlotInputs();
   if (key.endsWith('h')) {
     const combo = button.closest('.combo');
     updateClockChoices(combo);
@@ -610,16 +741,36 @@ function setClock(button) {
   }
 }
 
-function chosenTimes() {
+function checkSlotInputs(root = view) {
   const { sh, sm, eh, em } = org.time;
   const start = Schedule.readClock(sh, sm);
   const end = org.hasEnd ? Schedule.readClock(eh, em) : null;
-  if (start === null || (org.hasEnd && end === null)) throw new Error('時は0〜23、分は0〜59の半角数字で入力してください。');
-  if (end !== null && start >= end) throw new Error('終了時刻は開始時刻より後にしてください。');
-  return { start, end };
+  const calendarTitle = $('#calendar-title', root);
+  const missingDate = !org.selected.size && !org.dates.size;
+  showInputError([calendarTitle], $('#calendar-error', root), missingDate ? 'カレンダーで日付を選んでください。' : '');
+  $('#calendar-section', root).classList.toggle('has-error', missingDate);
+
+  const editDate = $('#edit-date', root);
+  const parsed = dateUTC(org.editDate);
+  const badEditDate = org.selected.size === 1 &&
+    (!/^\d{4}-\d{2}-\d{2}$/.test(org.editDate) || Number.isNaN(parsed.getTime()) || isoDate(parsed) !== org.editDate);
+  showInputError([editDate], $('#edit-date-error', root), badEditDate ? '変更後の日付を指定してください。' : '');
+  let firstError = missingDate ? calendarTitle : badEditDate ? editDate : null;
+
+  for (const [prefix, hour, minute, enabled] of [['s', sh, sm, true], ['e', eh, em, org.hasEnd]]) {
+    const fields = [$('#' + prefix + 'h', root), $('#' + prefix + 'm', root)];
+    const wrongOrder = prefix === 'e' && start !== null && end !== null && start >= end;
+    const invalid = enabled ? fields.filter((_, index) => wrongOrder || (index === 0
+      ? Schedule.readClock(hour, '0') === null : Schedule.readClock('0', minute) === null)) : [];
+    const message = wrongOrder ? '終了時刻は開始時刻より後にしてください。' : invalid.length ? '時は0〜23、分は0〜59の半角数字で入力してください。' : '';
+    showInputError(fields, $('#' + prefix + '-clock-error', root), message, invalid);
+    firstError ??= invalid[0];
+  }
+  return { firstError, start, end };
 }
 
 function setSelectedSlots(selected) {
+  org.checkedSlots = false;
   if (selected.size === 1) {
     const [id] = selected;
     if (org.selected.size !== 1 || !org.selected.has(id)) org.editDate = event().slots.find(slot => slot.id === id).date;
@@ -641,22 +792,20 @@ function setSelectedSlots(selected) {
 }
 
 async function saveSlots(editing) {
-  if (editing ? !org.selected.size : !org.dates.size) throw new Error(editing ? '編集する候補を選んでください。' : 'カレンダーで日付を選んでください。');
-  const time = chosenTimes();
+  if (editing && !org.selected.size) throw new Error('編集する候補を選んでください。');
+  $('#org-error').hidden = true;
+  org.checkedSlots = true;
+  const { firstError, start, end } = checkSlotInputs();
+  if (firstError) { firstError.focus(); return; }
+  const time = { start, end };
   const old = event().slots;
-  let editDate;
-  if (editing && org.selected.size === 1) {
-    editDate = org.editDate;
-    const parsed = dateUTC(editDate);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDate) || Number.isNaN(parsed.getTime()) || isoDate(parsed) !== editDate) {
-      throw new Error('変更後の日付を指定してください。');
-    }
-  }
+  const editDate = editing && org.selected.size === 1 ? org.editDate : null;
   const slots = editing ? old.map(slot => org.selected.has(slot.id) ? { ...slot, ...time, date: editDate ?? slot.date } : slot) :
     old.concat([...org.dates].map(date => ({ id: store.id(), date, ...time })));
   const keys = slots.map(slot => [slot.date, slot.start, slot.end].join('/'));
   if (new Set(keys).size < keys.length) throw new Error('同じ日付・時刻の候補がすでにあります。時間を変えるか、日付の選択を見直してください。');
   await store.update(eventId, uid, event().revision, { slots: slots.sort(Schedule.slotOrder) });
+  org.checkedSlots = false;
   if (editing) setSelectedSlots(new Set());
   render();
   toast(editing ? '選択した候補を更新しました。' : org.dates.size + '件の候補を追加しました。');
@@ -676,36 +825,62 @@ function selectMark(button) {
   updateAnswerStatus();
 }
 
-function showShare() {
-  const message = store === cloud
-    ? 'このURLを知っている人が、回答を登録し、保存済みの名前と回答を確認できます。'
-    : 'ローカルデモのイベントと回答は、作成したブラウザで確認できます。';
-  ask('イベントリンク', '<p>' + message + '</p>' +
-    '<label>イベントのURL<input id="share-url" readonly value="' + esc(shareURL()) + '"></label>', 'copy', 'リンクをコピー');
+function showShare(saved = false) {
+  const content = template('share');
+  $('#share-saved', content).hidden = !saved;
+  const input = $('#share-url', content);
+  input.value = shareURL();
+  input.addEventListener('click', () => input.select());
+  let message = '参加者に送ると、このリンクから回答・結果の確認ができます。';
+  if (event().status === 'closed') message = '参加者に送ると、確定した日程と結果を確認できます。';
+  else if (!event().slots.length) message = '候補日時を追加すると、参加者がこのリンクから回答できます。';
+  if (store !== cloud) message = 'ローカルデモのリンクです。イベントは作成したブラウザーで確認できます。';
+  $('#share-message', content).textContent = message;
+  dialog.replaceChildren(content);
+  dialog.showModal();
 }
 
 let pendingFinal;
 let pendingReopen;
 const actions = {
-  home: () => { if (screen !== 'home') openHome(); },
+  home: () => { if (screen !== 'home') openHome(); else closeMenu(true); },
+  'toggle-menu': button => button.setAttribute('aria-expanded', button.getAttribute('aria-expanded') !== 'true'),
   'new-event': async () => {
     const destination = cloud || DemoStore;
     openEvent(await destination.create(destination.identity()), 'organizer');
   },
   'open-event': button => openEvent(button.dataset.eventId, 'organizer'),
+  'pin-event': button => {
+    if (DemoStore.isPinned(baseUid, eventId)) DemoStore.unpin(baseUid, eventId);
+    else DemoStore.pin(baseUid, eventId, event().title);
+    updatePinButton(button);
+    renderPins();
+  },
+  'unpin-event': button => {
+    const { identity, eventId: id } = button.dataset;
+    DemoStore.unpin(identity, id);
+    const currentPin = $('[data-action=pin-event]');
+    if (currentPin && id === eventId && identity === baseUid) updatePinButton(currentPin);
+    renderPins();
+    ($('#pinned-events .pinned-open') ?? $('#go-home')).focus();
+  },
   view: button => setScreen(button.dataset.key),
   'focus-editor': () => $(org.selected.size ? '#edit-time-title' : '#calendar-title').focus(),
-  share: showShare,
+  share: () => showShare(),
+  help: () => {
+    dialog.replaceChildren(template('help'));
+    dialog.showModal();
+  },
   'close-dialog': () => dialog.close(),
   copy: async () => {
     const input = $('#share-url');
     try {
       await navigator.clipboard.writeText(input.value);
-      toast('リンクをコピーしました。');
+      $('#share-status').textContent = 'リンクをコピーしました。';
     } catch {
       input.focus();
       input.select();
-      toast('選択したURLをコピーできます。');
+      $('#share-status').textContent = '選択されたリンクをコピーしてください。';
     }
   },
   month: button => { changeMonth(+button.dataset.value); renderOrganizer(); $('[data-action=month][data-value="' + button.dataset.value + '"]').focus(); },
@@ -724,20 +899,46 @@ const actions = {
   },
   'clock-value': setClock,
   settings: async () => {
-    const title = org.title.trim();
-    const minimum = +org.minimum;
-    const minimumPeople = +org.minimumPeople;
-    if (!title) { $('#event-name').focus(); throw new Error('イベント名を入力してください。'); }
-    if (!/^\d+$/.test(org.minimum) || minimum < 1 || minimum > Schedule.DAY) {
-      $('#minimum').focus();
-      throw new Error('最低開催時間は1〜1440分で入力してください。');
+    const savingSettings = !event().locked && event().status === 'open';
+    const savingEventId = eventId;
+    const changes = {};
+    const memoInput = org.memo;
+    const memo = memoInput.trim();
+    if (memo !== org.savedMemo) changes.memo = memo;
+    if (savingSettings) {
+      org.checkedSettings = true;
+      const firstError = checkSettings();
+      if (firstError) {
+        $('.event-settings').open = true;
+        firstError.focus();
+        return;
+      }
+      const title = org.title.trim();
+      const minimum = +org.minimum;
+      const minimumPeople = +org.minimumPeople;
+      org.checkedSettings = false;
+      if (title !== event().title || minimum !== event().minimum || minimumPeople !== (event().minimumPeople ?? 1)) {
+        Object.assign(changes, { title, minimum, minimumPeople });
+      }
     }
-    if (!/^\d+$/.test(org.minimumPeople) || minimumPeople < 1 || minimumPeople > Schedule.MAX_PEOPLE) {
-      $('#minimum-people').focus();
-      throw new Error('最低参加人数は1〜9999人で入力してください。');
+    if (!Object.keys(changes).length) {
+      if (savingSettings) showShare();
+      else toast('変更はありません。');
+      return;
     }
-    await store.update(eventId, uid, event().revision, { title, minimum, minimumPeople });
-    toast('イベント設定を保存しました。');
+    await store.update(eventId, uid, event().revision, changes, org.savedMemo);
+    if (eventId !== savingEventId || screen !== 'organizer') return;
+    if (changes.memo !== undefined) {
+      org.savedMemo = memo;
+      if (org.memo === memoInput) {
+        org.memo = memo;
+        $('#organizer-memo').value = memo;
+      }
+    }
+    if (savingSettings) {
+      $('[data-action=settings]').focus({ preventScroll: true });
+      showShare(true);
+    } else toast('イベント概要を保存しました。');
   },
   'add-slots': () => saveSlots(false),
   'apply-edit': () => saveSlots(true),
@@ -770,20 +971,15 @@ const actions = {
   },
   'save-answer': async () => {
     const current = draft();
-    if (!current.name.trim()) { $('#answer-name').focus(); throw new Error('名前を入力してください。'); }
-    const missing = event().slots.find(slot => !current.answers[slot.id]?.mark);
-    if (missing) {
-      $('[data-answer="' + missing.id + '"] [data-mark=yes]').focus();
-      throw new Error(dateText(missing.date) + ' ' + minutesText(missing.start) + ' の回答を選んでください。');
-    }
-    const missingBuffer = event().slots.find(slot => Schedule.needsBuffer(slot, current.answers[slot.id]));
-    if (missingBuffer) {
-      $('[data-answer="' + missingBuffer.id + '"] [data-action=zero-buffer]').focus();
-      throw new Error(dateText(missingBuffer.date) + ' ' + minutesText(missingBuffer.start) + ' の前後の余裕を指定してください。');
-    }
+    $('#answer-error').hidden = true;
+    current.checked = true;
+    const firstError = updateAnswerStatus();
+    if (firstError) { firstError.focus(); return; }
     await store.submit(eventId, uid, current.revision, current);
+    if (uid === baseUid) rememberPersonalEvent(true);
     current.dirty = false;
     current.stale = false;
+    current.checked = false;
     setScreen('results');
     toast('回答を保存しました。');
   },
@@ -832,6 +1028,7 @@ document.addEventListener('click', async evt => {
 });
 
 document.addEventListener('keydown', evt => {
+  if (evt.key === 'Escape' && evt.target.closest('.sidebar')) closeMenu(true);
   const combo = evt.target.closest('.combo');
   if (!combo) return;
   if (evt.key === 'Escape' && !$('.combo-list', combo).hidden) {
@@ -871,7 +1068,13 @@ view.addEventListener('input', evt => {
   if (field.id === 'event-name') org.title = field.value;
   if (field.id === 'minimum') org.minimum = field.value;
   if (field.id === 'minimum-people') org.minimumPeople = field.value;
+  if (field.id === 'organizer-memo') org.memo = field.value;
   if (field.id === 'edit-date') org.editDate = field.value;
+  if (org?.checkedSettings && ['event-name', 'minimum', 'minimum-people'].includes(field.id)) checkSettings();
+  if (org?.checkedSlots && (field.dataset.clock || field.id === 'edit-date')) {
+    $('#org-error').hidden = true;
+    checkSlotInputs();
+  }
   if (field.id === 'answer-name') {
     const current = draft();
     current.name = field.value;
@@ -890,10 +1093,6 @@ view.addEventListener('input', evt => {
     $('#shift-' + field.dataset.offset + '-' + slot.id).textContent = shiftText(value);
     field.setAttribute('aria-valuetext', shiftText(value));
     $('[data-available]', card).textContent = dateText(slot.date) + ' ' + rangeText(...Schedule.availability(slot, answer));
-    const error = Schedule.answerError(slot, answer);
-    $('[data-slot-error]', card).hidden = !error;
-    $('[data-slot-error]', card).textContent = error;
-    updateBufferButton(card, slot, answer);
     $('#answer-error').hidden = true;
     updateAnswerStatus();
   }
@@ -931,13 +1130,20 @@ document.addEventListener('change', evt => {
 function refreshEvent(next) {
   const previous = record;
   record = next;
+  rememberPersonalEvent();
+  if (record && org) {
+    const { memo, savedMemo } = org;
+    if (screen === 'organizer' && !busy && record.event.revision !== previous?.event.revision) resetOrganizer();
+    if (memo !== savedMemo) Object.assign(org, { memo, savedMemo });
+    else org.memo = org.savedMemo = event().memo ?? '';
+  }
   if (screen === 'answer' && record && previous && record.event.status === previous.event.status &&
       record.event.revision === previous.event.revision && draft().dirty) {
     const count = $('#submitted-count');
     if (count) count.textContent = record.responses.length + ' 人回答済み';
+    renderEventMemo(document);
     return;
   }
-  if (screen === 'organizer' && record && !busy && record.event.revision !== previous?.event.revision) resetOrganizer();
   render();
 }
 
@@ -962,7 +1168,7 @@ function restoreRoute() {
 async function start() {
   let failed = false;
   if (globalThis.YOSERU_FIREBASE_CONFIG) {
-    const controls = [$('#go-home'), $('#sample')];
+    const controls = [$('#go-home'), $('#sample'), $('#new-event')];
     controls.forEach(control => { control.disabled = true; });
     renderLoading('共有モードに接続中…');
     try {

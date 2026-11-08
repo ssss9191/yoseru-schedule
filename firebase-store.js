@@ -27,6 +27,7 @@
         !Number.isInteger(slot.start) || slot.start < 0 || slot.start >= Schedule.DAY ||
         (slot.end !== null && (!Number.isInteger(slot.end) || slot.end <= slot.start || slot.end >= Schedule.DAY));
       if (!event || event.id !== document.id || typeof event.title !== 'string' ||
+          (event.memo !== undefined && (typeof event.memo !== 'string' || event.memo.length > 500)) ||
           !Number.isInteger(event.minimum) || !Array.isArray(event.slots) || event.slots.some(badSlot) ||
           !Array.isArray(event.slotIds) || event.slots.length !== event.slotIds.length ||
           event.slots.some((slot, index) => slot.id !== event.slotIds[index])) {
@@ -42,7 +43,7 @@
             !response.name.trim() || response.name.length > 40 || !response.answers) return [];
         const answers = Object.fromEntries(event.slots.flatMap(slot => {
           const answer = response.answers[slot.id];
-          return Schedule.needsBuffer(slot, answer) || Schedule.answerError(slot, answer) ? [] : [[slot.id, answer]];
+          return Schedule.answerError(slot, answer) ? [] : [[slot.id, answer]];
         }));
         return [{ uid: response.uid, name: response.name, answers }];
       });
@@ -122,12 +123,15 @@
       });
     }
 
-    function update(id, uid, revision, changes) {
+    function update(id, uid, revision, changes, expectedMemo) {
       return changeEvent(id, event => {
-        model.editEvent(event, uid, revision, changes);
+        const previousRevision = event.revision;
+        model.editEvent(event, uid, revision, changes, expectedMemo);
+        if (event.revision === previousRevision) return { memo: event.memo };
         const { title, minimum, minimumPeople, slots } = event;
         return {
           title, minimum, slots, slotIds: slots.map(slot => slot.id), revision: event.revision,
+          ...(changes.memo === undefined ? {} : { memo: event.memo }),
           ...(minimumPeople === undefined ? {} : { minimumPeople })
         };
       });
