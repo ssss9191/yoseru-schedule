@@ -5,82 +5,124 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="○△×と参加可能な時間で日程を調整する、授業課題のプロトタイプ。">
   <meta name="theme-color" content="#f5f5f6">
-  <title>よせる | 日程調整</title>
+  <title>よせあい | 日程調整</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css?v=help-guide">
-  <script defer src="./schedule.js?v=input-errors"></script>
-  <script defer src="./store.js?v=input-errors"></script>
+  <link rel="stylesheet" href="./style.css?v=compact-answers">
+  <script defer src="./schedule.js?v=organizer-draft"></script>
+  <script defer src="./store.js?v=organizer-draft"></script>
   <script defer src="./firebase-config.js"></script>
-  <script defer src="./firebase-store.js?v=input-errors"></script>
-  <script defer src="./app.js?v=help-guide"></script>
+  <script defer src="./firebase-store.js?v=list-delete"></script>
+  <script defer src="./app.js?v=yoseai"></script>
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
   <div class="app-layout">
     <header class="sidebar">
       <div class="sidebar-top">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">△</span><div><strong>よせあい</strong><small>日程調整</small></div></div>
+        <button id="new-event" type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
         <button id="menu-toggle" type="button" class="button menu-toggle" data-action="toggle-menu" aria-label="メニュー" aria-expanded="false" aria-controls="sidebar-menu">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
         </button>
-        <div class="brand"><span class="brand-mark" aria-hidden="true">△</span><div><strong>よせる</strong><small>日程調整</small></div></div>
-        <button id="new-event" type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
       </div>
+      <button type="button" class="menu-backdrop" data-action="close-menu" aria-label="メニューを閉じる" tabindex="-1"></button>
       <div id="sidebar-menu" class="sidebar-menu">
+        <div class="drawer-heading"><strong>メニュー</strong><button type="button" class="button drawer-close" data-action="close-menu" aria-label="メニューを閉じる">×</button></div>
         <nav class="app-nav" aria-label="アプリのメニュー">
           <button id="go-home" type="button" data-action="home">イベント一覧</button>
-          <button id="sample" type="button">回答入りデモ</button>
-          <button type="button" data-action="help" aria-haspopup="dialog">使い方</button>
+          <button id="go-help" type="button" data-action="help">使い方</button>
         </nav>
         <nav class="pinned-nav" aria-labelledby="pinned-title">
           <h2 id="pinned-title">ピン留め</h2>
           <ul id="pinned-events"></ul>
           <p id="pinned-empty" class="hint">イベントからピン留めできます。</p>
         </nav>
-        <p class="mode"><span id="mode-label">ローカルデモ</span></p>
       </div>
     </header>
     <div class="workspace">
       <main id="main" class="shell" tabindex="-1">
-        <section id="event-header" class="event-header" aria-label="イベント概要"></section>
-        <nav id="views" class="views" aria-label="イベント内のメニュー"></nav>
-        <section id="view" aria-labelledby="view-title"></section>
+        <div id="work-area">
+          <section id="event-header" class="event-header" aria-label="イベント概要"></section>
+          <nav id="views" class="views" aria-label="イベント内のメニュー"></nav>
+          <section id="view" aria-labelledby="view-title"></section>
+        </div>
+        <section id="guide" aria-labelledby="guide-title" hidden>
+          <header class="page-heading home-header">
+            <div><h1 id="guide-title" tabindex="-1">使い方</h1><p>イベントを作ってから、回答を集めて日程を決めるまで。</p></div>
+            <button type="button" class="button secondary small" data-action="leave-help">元の画面に戻る</button>
+          </header>
+          <ol class="help-steps" role="list">
+            <li>
+              <div>
+                <h2>イベントを作って共有</h2>
+                <p>「＋ 新しいイベント」を開き、カレンダーで日付を選びます。開始時刻を入力し、「選択した日付に追加」を押します。終了時刻は必要なときに指定できます。</p>
+                <p>イベント名や開催条件を入力し、画面下の「変更を保存」で内容を確認します。保存後は「自分の回答」に移り、主催者も回答できます。</p>
+              </div>
+              <figure>
+                <svg class="guide-figure" viewBox="0 0 340 150" role="img" aria-label="カレンダーで16日と18日を選び、開始18時30分の候補を追加する例">
+                  <rect class="guide-frame" x="1" y="1" width="338" height="148" rx="5"/>
+                  <text class="guide-label" x="17" y="27">日付を選択</text><text class="guide-label" x="189" y="27">時間枠を指定</text>
+                  <path class="guide-rule" d="M169 17v115"/>
+                  <rect class="guide-selected" x="18" y="45" width="31" height="29" rx="3"/><rect class="guide-selected" x="86" y="45" width="31" height="29" rx="3"/>
+                  <text class="guide-invert" x="25" y="65">16</text><text x="60" y="65">17</text><text class="guide-invert" x="93" y="65">18</text><text x="127" y="65">19</text>
+                  <text x="25" y="99">20</text><text x="60" y="99">21</text><text x="93" y="99">22</text><text x="127" y="99">23</text>
+                  <text x="189" y="63">開始</text><rect class="guide-field" x="230" y="44" width="87" height="29" rx="3"/><text x="244" y="64">18 : 30</text>
+                  <rect class="guide-selected" x="189" y="88" width="128" height="31" rx="4"/><text class="guide-invert" x="197" y="108">選択した日付に追加</text>
+                </svg>
+                <figcaption>複数の日付に同じ時間枠をまとめて追加できます。</figcaption>
+              </figure>
+            </li>
+            <li>
+              <div>
+                <h2>候補ごとに回答</h2>
+                <p>名前を入力して、候補ごとに○・△・×を選びます。○は元の時間で参加できるとき、△は時間の調整が必要なときに使います。</p>
+                <p>終了未定の候補は開始時刻だけ調整できます。途中で退出する必要がある場合は「参加できる上限時刻」を入力してから回答を保存します。</p>
+              </div>
+              <figure>
+                <svg class="guide-figure" viewBox="0 0 340 150" role="img" aria-label="終了未定の候補に△と回答し、開始を20分遅らせて20時まで参加可能とする例">
+                  <rect class="guide-frame" x="1" y="1" width="338" height="148" rx="5"/>
+                  <text class="guide-label" x="17" y="31">11/16（月）18:00〜 終了未定</text>
+                  <rect class="guide-field" x="232" y="12" width="91" height="30" rx="4"/><rect class="guide-maybe" x="262" y="13" width="30" height="28"/>
+                  <text x="239" y="32">○</text><text x="269" y="32">△</text><text x="300" y="32">×</text>
+                  <path class="guide-rule" d="M16 54h308"/><text x="17" y="81">開始時刻</text><path class="guide-track" d="M98 76h133"/><circle class="guide-selected" cx="175" cy="76" r="6"/><text x="254" y="81">+20分</text>
+                  <text x="17" y="119">参加できる上限時刻</text><rect class="guide-field" x="177" y="99" width="121" height="31" rx="4"/><text x="192" y="119">当日 20:00</text>
+                </svg>
+                <figcaption>この例では18:20から20:00まで参加できます。</figcaption>
+              </figure>
+            </li>
+            <li>
+              <div>
+                <h2>結果を見て日程を確定</h2>
+                <p>「結果・回答一覧」には、開催条件を満たす提案が参加可能人数順に表示されます。終了未定の候補は最低人数で判定し、開始時刻を提案します。</p>
+                <p>主催者が「この案で確定」を押すと受付が終了します。確定を取り消すと、受付を再開できます。</p>
+              </div>
+              <figure>
+                <svg class="guide-figure" viewBox="0 0 340 132" role="img" aria-label="提案を参加人数順に比較し、3人全員が参加できる1位の案で確定する例">
+                  <rect class="guide-frame" x="1" y="1" width="338" height="130" rx="5"/>
+                  <text class="guide-label" x="16" y="29">自動調整の提案</text>
+                  <path class="guide-rule" d="M16 43h308M16 81h308"/>
+                  <text x="16" y="66">1</text><text x="40" y="66">11/16 18:30〜19:30</text><text class="guide-label" x="174" y="66">3 / 3人</text>
+                  <rect class="guide-selected" x="233" y="48" width="91" height="29" rx="4"/><text class="guide-invert" x="238" y="66">この案で確定</text>
+                  <text x="16" y="104">2</text><text x="40" y="104">11/18 19:00〜21:00</text><text x="174" y="104">2 / 3人</text>
+                </svg>
+                <figcaption>条件を満たす案を、参加できる人数で比較できます。</figcaption>
+              </figure>
+            </li>
+          </ol>
+          <section class="guide-note" aria-labelledby="guide-reopen">
+            <h2 id="guide-reopen">イベントを開き直す</h2>
+            <p>「イベント一覧」から作成・回答したイベントを開けます。よく使うイベントは「☆ ピン留め」でメニューに追加できます。</p>
+            <p class="hint">共有モードでは同じリンクを参加者に送れます。ローカルデモのイベントは作成したブラウザーで確認できます。</p>
+          </section>
+        </section>
         <noscript>このプロトタイプを操作するにはJavaScriptを有効にしてください。</noscript>
       </main>
-      <footer class="shell footer"><span>Webプログラミング課題2</span><span id="storage-note">デモの回答はこのブラウザに保存されます</span></footer>
     </div>
   </div>
   <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- 画面を編集する場所。JavaScriptが各テンプレートを表示し、idやdata属性で値を入れます。 -->
-  <template id="help-template">
-    <div class="help-guide">
-      <header class="section-top">
-        <h2 id="dialog-title">使い方</h2>
-        <button type="button" class="button secondary small" data-action="close-dialog" autofocus>閉じる</button>
-      </header>
-      <ol class="help-steps">
-        <li>
-          <h3>イベントを作って共有</h3>
-          <p>「＋ 新しいイベント」から、開催条件と候補日時を入力します。日付と時刻を指定して候補を追加し、「設定を保存」から共有リンクをコピーします。</p>
-        </li>
-        <li>
-          <h3>候補ごとに回答</h3>
-          <p>名前と○・△・×を選び、「回答を保存」を押します。○は調整しなければ前後0分です。△は参加できる開始・終了時刻に調整できます。</p>
-        </li>
-        <li>
-          <h3>結果を見て日程を確定</h3>
-          <p>「結果・回答一覧」で全員の回答と、開催条件を満たす提案を確認できます。主催者は案を確定したり、確定を取り消して受付を再開したりできます。</p>
-        </li>
-        <li>
-          <h3>イベントを開き直す</h3>
-          <p>「イベント一覧」から作成・回答したイベントを開けます。よく使うイベントは、画面上部の「☆ ピン留め」でメニューに追加できます。</p>
-        </li>
-      </ol>
-      <p class="hint">共有モードでは同じリンクを参加者に送れます。ローカルデモのイベントは作成したブラウザーで確認できます。</p>
-    </div>
-  </template>
-
   <template id="share-template">
     <h2 id="dialog-title">このリンクを共有しよう</h2>
     <p id="share-saved" hidden>設定を保存しました。</p>
@@ -103,18 +145,18 @@
         <p>自分が作ったイベントや、回答したイベントを開けます。</p>
       </div>
     </header>
-    <section aria-labelledby="home-list-title">
+    <section class="owned-events" aria-labelledby="home-list-title">
       <div class="section-top list-heading">
         <h2 id="home-list-title">自分が作ったイベント</h2>
         <span class="pill" id="home-count"></span>
       </div>
       <div class="home-columns" id="home-columns" aria-hidden="true" hidden>
-        <span>イベント名</span><span>状態</span><span>候補・回答</span><span>確定日時</span><span></span>
+        <span>イベント名</span><span>状態</span><span>候補・回答</span><span>確定日時</span>
       </div>
       <ul id="home-events" class="home-events"></ul>
       <div id="home-empty" class="empty" hidden>
         <strong>イベントはまだありません</strong>
-        <p>「新しいイベント」から候補日時を登録できます。操作を試すなら、メニューの「回答入りデモ」を開いてください。</p>
+        <p>「新しいイベント」から候補日時を登録できます。</p>
       </div>
     </section>
     <section class="joined-section" aria-labelledby="joined-list-title">
@@ -125,14 +167,13 @@
       <ul id="joined-events" class="home-events"></ul>
       <div id="joined-empty" class="empty">
         <strong>参加しているイベントはまだありません</strong>
-        <p>共有リンクからイベントを開いて回答を保存すると、ここに表示されます。</p>
       </div>
     </section>
   </template>
 
   <template id="joined-event-template">
     <li><button type="button" class="joined-event" data-action="open-event">
-      <strong data-event-title></strong><span class="state">回答済み</span><span class="home-event-open">開く <span aria-hidden="true">→</span></span>
+      <strong data-event-title></strong><span class="state">回答済み</span>
     </button></li>
   </template>
 
@@ -144,14 +185,14 @@
   </template>
 
   <template id="home-event-template">
-    <li>
+    <li class="owned-event-row">
       <button type="button" class="home-event" data-action="open-event">
         <strong class="home-event-title" data-event-title></strong>
         <span class="state" data-event-state></span>
         <span class="home-event-summary" data-event-summary></span>
         <span class="home-event-final" data-event-final hidden></span>
-        <span class="home-event-open">開く <span aria-hidden="true">→</span></span>
       </button>
+      <button type="button" class="button danger small home-delete" data-action="delete-listed-event">削除</button>
     </li>
   </template>
 
@@ -171,6 +212,7 @@
     <div class="event-tools">
       <button type="button" class="button secondary small pin-event" data-action="pin-event" aria-pressed="false"><span aria-hidden="true">☆</span> ピン留め</button>
       <button type="button" class="button secondary small" data-action="share">共有リンクを表示</button>
+      <button type="button" class="button secondary small" data-action="reopen" hidden>確定を取り消す</button>
       <label class="profile">
         デモ操作
         <select id="profile" aria-label="デモ操作のプロフィール">
@@ -178,15 +220,13 @@
         </select>
       </label>
     </div>
+    <section class="final-banner" aria-labelledby="final-heading" hidden>
+      <h2 id="final-heading" tabindex="-1">日程が確定しました</h2>
+      <p id="final-time"></p>
+    </section>
     <div id="event-overview" class="event-overview" hidden>
       <strong>イベント概要</strong>
       <p id="event-memo"></p>
-    </div>
-    <div class="final-banner" hidden>
-      <strong>✓ 日程確定</strong>
-      <span id="final-time"></span>
-      <small id="final-attendance"></small>
-      <button type="button" class="button secondary small" data-action="reopen" hidden>確定を取り消す</button>
     </div>
   </template>
 
@@ -205,8 +245,8 @@
 
     <p id="organizer-locked" class="notice" hidden>日程を確定済みです。候補を編集するには「確定を取り消す」で受付を再開してください。</p>
     <p id="organizer-edit-note" class="notice" hidden>追加・変更した枠には、新しく回答が必要です。ほかの枠への回答は引き継がれます。</p>
-    <details class="event-settings">
-      <summary>イベント設定</summary>
+    <section class="event-settings" aria-labelledby="event-settings-title">
+      <h3 id="event-settings-title">イベント設定</h3>
       <div class="settings-fields">
         <div>
           <label>イベント名<input id="event-name" maxlength="60"></label>
@@ -231,22 +271,8 @@
           <p id="minimum-people-error" class="error" hidden></p>
         </div>
       </div>
-    </details>
+    </section>
     <div class="organizer-workspace">
-      <section class="candidate-list" aria-labelledby="registered-title">
-        <div class="section-top list-heading">
-          <h3 id="registered-title">登録済みの候補 <span class="pill" id="registered-count"></span></h3>
-          <button id="jump-to-editor" type="button" class="button text small" data-action="focus-editor">日時を入力</button>
-        </div>
-        <div id="slot-list-tools" class="section-top slot-list-tools" hidden>
-          <label class="check"><input type="checkbox" id="all-slots"> すべて選択</label>
-          <div class="actions bulk">
-            <span><span id="bulk-count"></span>件選択</span>
-            <button type="button" class="button danger small" data-action="delete-slots">選択分を削除</button>
-          </div>
-        </div>
-        <div id="registered-slots"></div>
-      </section>
       <div class="organizer-grid">
         <section id="calendar-section" class="editor-section" aria-labelledby="calendar-title">
           <h3 id="calendar-title" tabindex="-1">日付を選択</h3>
@@ -264,7 +290,7 @@
           <h3 id="edit-time-title" tabindex="-1" hidden>選択した候補を編集</h3>
           <label id="edit-date-row" class="edit-date" hidden>変更後の日付<input id="edit-date" type="date"></label>
           <p id="edit-date-error" class="error" hidden></p>
-          <p class="hint">「選ぶ」で時と分を指定。分の候補は10分刻みで、数字は直接入力もできます。</p>
+          <p class="hint">「選ぶ」で時と分を指定。分の候補は5分刻みで、数字は直接入力もできます。</p>
           <div class="time-editor">
             <div class="time-group">
               <strong>開始</strong>
@@ -288,6 +314,20 @@
           </div>
         </section>
       </div>
+      <section class="candidate-list" aria-labelledby="registered-title">
+        <div class="section-top list-heading">
+          <h3 id="registered-title"><span id="registered-label">登録済みの候補</span> <span class="pill" id="registered-count"></span></h3>
+          <button id="jump-to-editor" type="button" class="button text small" data-action="focus-editor">日時を入力</button>
+        </div>
+        <div id="slot-list-tools" class="section-top slot-list-tools" hidden>
+          <label class="check"><input type="checkbox" id="all-slots"> すべて選択</label>
+          <div class="actions bulk">
+            <span><span id="bulk-count"></span>件選択</span>
+            <button type="button" class="button danger small" data-action="delete-slots">選択分を削除</button>
+          </div>
+        </div>
+        <div id="registered-slots"></div>
+      </section>
     </div>
     <section class="organizer-notes" aria-labelledby="memo-title">
       <h3 id="memo-title">イベント概要（メモ）</h3>
@@ -295,8 +335,9 @@
       <textarea id="organizer-memo" aria-labelledby="memo-title" aria-describedby="memo-help" maxlength="500" rows="3" placeholder="準備するものや確認事項など"></textarea>
     </section>
     <div class="organizer-footer">
-      <p id="settings-save-help" class="hint">イベント設定とメモを保存します。</p>
-      <button type="button" class="button primary" data-action="settings">設定を保存</button>
+      <button type="button" class="button danger small" data-action="delete-event" hidden>イベントを削除</button>
+      <p id="settings-save-help" class="hint" role="status">候補日時・イベント設定・メモをまとめて保存します。</p>
+      <button type="button" class="button primary" data-action="settings">変更を保存</button>
     </div>
   </template>
 
@@ -371,14 +412,17 @@
         </div>
       </div>
       <p data-answer-required class="error answer-required" hidden></p>
-      <div class="buffer" data-yes-buffer hidden>
-        <div class="yes-buffer-heading">
-          <strong>前後の余裕 <small class="pill">任意</small></strong>
-          <button type="button" class="button secondary small" data-action="zero-buffer">前後0分に戻す</button>
+      <details class="answer-adjustment" name="answer-adjustment" hidden>
+        <summary>時刻を調整 <span data-adjustment-error class="error" hidden>入力を確認</span></summary>
+        <div class="buffer" data-yes-buffer hidden>
+          <div class="yes-buffer-heading">
+            <strong><span data-buffer-title>前後の余裕</span> <small class="pill">任意</small></strong>
+            <button type="button" class="button secondary small" data-action="zero-buffer">前後0分に戻す</button>
+          </div>
+          <p class="hint">スライダーを動かさなければ、前後0分で保存されます。</p>
         </div>
-        <p class="hint">スライダーを動かさなければ、前後0分で保存されます。</p>
-      </div>
-      <div class="buffer" data-maybe-buffer hidden></div>
+        <div class="buffer" data-maybe-buffer hidden></div>
+      </details>
     </li>
   </template>
 
@@ -389,6 +433,14 @@
       <div class="available"><small>参加可能日時</small><strong data-available></strong></div>
     </div>
     <div class="sliders"></div>
+    <fieldset class="answer-limit" data-limit hidden>
+      <legend>参加できる上限時刻 <small class="pill">任意</small></legend>
+      <div class="limit-fields">
+        <select data-until-day aria-label="上限時刻の日付"><option value="0">当日</option><option value="1">翌日</option></select>
+        <div data-limit-clock></div>
+      </div>
+      <p class="hint">何時まで参加できるか伝えたい場合に入力します。</p>
+    </fieldset>
     <p data-slot-error class="error" role="alert" hidden></p>
   </template>
 
@@ -403,14 +455,14 @@
         <h3 id="proposals-title">自動調整の提案</h3>
         <span class="pill">最低 <span id="results-minimum"></span> 分 · <span id="results-minimum-people"></span> 人</span>
       </div>
-      <p class="hint">参加可能人数順に最大3案。終了時刻がない候補は集計表で確認できます。</p>
+      <p class="hint">参加可能人数順に最大3案。終了未定の候補は最低人数で判定し、開始時刻を提案します。</p>
       <div id="no-proposals" class="empty" hidden>
         <strong>条件を満たす案なし</strong>
-        <p id="no-proposals-unmet">最低開催時間と最低参加人数を両方満たす時間帯がありません。</p>
-        <p id="no-proposals-pending">回答が集まると、設定した時間と人数を満たす案を提案します。</p>
+        <p id="no-proposals-unmet">開催条件を満たす候補がありません。</p>
+        <p id="no-proposals-pending">回答が集まると、開催条件に合う案を提案します。</p>
       </div>
       <table class="proposal-table" aria-labelledby="proposals-title">
-        <thead><tr><th scope="col">順位</th><th scope="col">提案日時</th><th scope="col">参加可能</th><th scope="col" id="proposal-action" hidden>操作</th></tr></thead>
+        <thead><tr><th scope="col">順位</th><th scope="col">提案日時</th><th scope="col">参加可能</th><th scope="col" id="proposal-action" hidden>日程確定</th></tr></thead>
         <tbody class="proposal-list"></tbody>
       </table>
     </section>
@@ -428,7 +480,7 @@
       <td class="rank"></td>
       <th scope="row" class="proposal-copy">
         <span data-proposed-date></span> <span class="numbers" data-proposed-time></span>
-        <span class="hint proposal-meta"><span data-duration></span>分 · <span data-people></span></span>
+        <span class="hint proposal-meta"><span data-duration></span><span data-people></span></span>
         <span class="hint proposal-meta">元の候補 <span data-source-time></span> · ○ <span data-original-yes></span>人</span>
       </th>
       <td class="proposal-count"><strong data-attending></strong> / <span data-total></span>人</td>

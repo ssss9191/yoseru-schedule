@@ -8,6 +8,7 @@ const weekdays = [...'日月火水木金土'];
 const marks = { yes: ['○', '参加できる'], maybe: ['△', '時間しだい'], no: ['×', '参加できない'] };
 const dayMs = 86400000;
 const view = $('#view');
+const guide = $('#guide');
 const dialog = $('#dialog');
 const drafts = new Map();
 let eventId;
@@ -21,6 +22,7 @@ let screen;
 let org;
 let simulated = [];
 let busy = false;
+let focusFinalEventId;
 let toastTimer;
 
 function esc(value) {
@@ -44,6 +46,8 @@ const rangeText = (start, end) => {
   const label = value => (value < 0 ? '前日 ' : value >= Schedule.DAY ? '翌日 ' : '') + minutesText(value);
   return label(start) + (end === null ? '〜' : '〜' + label(end));
 };
+const availabilityText = ([start, end]) => rangeText(start, end) + (end === null ? ' 終了未指定' : '');
+const candidateTime = (start, end) => rangeText(start, end) + (end === null ? ' 終了未定' : '');
 const shiftText = value => (value > 0 ? '+' : value < 0 ? '−' : '') + Math.abs(value) + '分';
 const badge = mark => '<span class="mark ' + mark + '" aria-label="' + marks[mark][1] + '">' + marks[mark][0] + '</span>';
 const btn = (label, action, style = '', attrs = '') => '<button type="button" class="button ' + style + '" data-action="' + action + '" ' + attrs + '>' + label + '</button>';
@@ -74,17 +78,69 @@ function eventFromURL() {
 
 function resetOrganizer() {
   const initial = dateUTC(event().slots[0]?.date || today());
-  const memo = event().memo ?? '';
   org = {
+    base: event(), slots: [...event().slots],
     month: new Date(Date.UTC(initial.getUTCFullYear(), initial.getUTCMonth(), 1)),
     dates: new Set(), selected: new Set(), title: event().title, minimum: String(event().minimum),
-    minimumPeople: String(event().minimumPeople ?? 1), memo, savedMemo: memo,
+    minimumPeople: String(event().minimumPeople ?? 1), memo: event().memo ?? '',
     time: { sh: '18', sm: '00', eh: '20', em: '00' }, hasEnd: false, addDraft: null
   };
 }
 
+function organizerChanges() {
+  const { base } = org;
+  const number = text => /^\d+$/.test(text) ? Number(text) : text;
+  const fields = [
+    ['title', 'イベント名', base.title, org.title.trim()],
+    ['minimum', '最低開催時間', base.minimum, number(org.minimum)],
+    ['minimumPeople', '最低参加人数', base.minimumPeople ?? 1, number(org.minimumPeople)],
+    ['memo', 'イベント概要', base.memo ?? '', org.memo.trim()]
+  ];
+  const changes = {};
+  const entries = [];
+  for (const [key, label, before, after] of fields) {
+    if (before === after) continue;
+    changes[key] = after;
+    const unit = key === 'minimum' ? '分' : key === 'minimumPeople' ? '人' : '';
+    entries.push(`${label}　${before || '（なし）'}${unit} → ${after || '（なし）'}${unit}`);
+  }
+  const previous = new Map(base.slots.map(slot => [slot.id, slot]));
+  const describe = slot => `${dateText(slot.date)} ${candidateTime(slot.start, slot.end)}`;
+  const slotEntries = [];
+  for (const slot of org.slots) {
+    const before = previous.get(slot.id);
+    if (!before) slotEntries.push(`候補を追加　${describe(slot)}`);
+    else if (slot.date !== before.date || slot.start !== before.start || slot.end !== before.end) {
+      slotEntries.push(`候補を変更　${describe(before)} → ${describe(slot)}`);
+    }
+    previous.delete(slot.id);
+  }
+  for (const slot of previous.values()) slotEntries.push(`候補を削除　${describe(slot)}`);
+  if (slotEntries.length) changes.slots = org.slots;
+  return { changes, entries: entries.concat(slotEntries) };
+}
+
+function pendingSlotEdit() {
+  return org.selected.size ? org.editPending : org.addTimeChanged || (org.addPending && org.dates.size > 0);
+}
+
+function hasUnsavedOrganizer() {
+  return screen === 'organizer' && record && org && owner() &&
+    (pendingSlotEdit() || organizerChanges().entries.length > 0);
+}
+
+function updateOrganizerSaveStatus(root = view) {
+  const status = $('#settings-save-help', root);
+  const unsaved = hasUnsavedOrganizer();
+  const message = unsaved ? '保存していない変更があります。' : '候補日時・イベント設定・メモをまとめて保存します。';
+  status.classList.toggle('unsaved', Boolean(unsaved));
+  if (status.textContent !== message) status.textContent = message;
+}
+
 function openEvent(id, initialView, replace = false) {
+  focusFinalEventId = null;
   closeMenu();
+  setGuide(false);
   stopWatching();
   stopWatching = () => {};
   const local = DemoStore.get(id);
@@ -101,6 +157,7 @@ function openEvent(id, initialView, replace = false) {
     record = next;
     simulated = store === DemoStore && record ? DemoStore.profiles(id) : [];
     if (record) resetOrganizer();
+    else forgetEvent();
     rememberPersonalEvent();
     if (!record || !owner()) screen = 'answer';
     history.replaceState({ eventId, screen }, '', shareURL());
@@ -127,7 +184,9 @@ function openEvent(id, initialView, replace = false) {
 }
 
 function openHome(replace = false) {
+  focusFinalEventId = null;
   closeMenu();
+  setGuide(false);
   stopWatching();
   stopWatching = () => {};
   eventId = null;
@@ -151,18 +210,44 @@ function template(name) {
   return $('#' + name + '-template').content.cloneNode(true);
 }
 
-function closeMenu(restoreFocus = false) {
+function setMenu(open, restoreFocus = false) {
   const toggle = $('#menu-toggle');
-  if (toggle.getAttribute('aria-expanded') !== 'true') return;
-  toggle.setAttribute('aria-expanded', 'false');
+  if ((toggle.getAttribute('aria-expanded') === 'true') === open) return;
+  toggle.setAttribute('aria-expanded', String(open));
+  $('.workspace').inert = open;
+  $('.sidebar-top').inert = open;
+  $('.skip').inert = open;
+  if (open) $('.drawer-close').focus();
   if (restoreFocus) toggle.focus();
+}
+
+function closeMenu(restoreFocus = false) {
+  setMenu(false, restoreFocus);
+}
+
+function updateNavigation() {
+  for (const [id, current] of [
+    ['go-home', guide.hidden && screen === 'home'],
+    ['go-help', !guide.hidden]
+  ]) {
+    const button = $('#' + id);
+    if (current) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+}
+
+function setGuide(open) {
+  if (guide.hidden === !open) return;
+  guide.hidden = !open;
+  $('#work-area').hidden = open;
+  updateNavigation();
+  renderPins();
 }
 
 function renderLoading(message) {
   $('#event-header').hidden = true;
   $('#views').hidden = true;
   $('#go-home').removeAttribute('aria-current');
-  $('#sample').removeAttribute('aria-current');
   renderPins();
   view.removeAttribute('aria-labelledby');
   view.innerHTML = '<div class="panel view-heading" role="status">' + esc(message) + '</div>';
@@ -191,6 +276,11 @@ function rememberPersonalEvent(submitted = false) {
   }
 }
 
+function forgetEvent(id = eventId, identity = baseUid) {
+  DemoStore.unpin(identity, id);
+  DemoStore.forgetJoined(identity, id);
+}
+
 function renderEventMemo(root) {
   const memo = event().memo ?? '';
   $('#event-overview', root).hidden = !memo;
@@ -211,7 +301,7 @@ function renderPins() {
       const open = $('.pinned-open', item);
       open.dataset.eventId = id;
       open.textContent = title;
-      if (id === eventId) open.setAttribute('aria-current', 'page');
+      if (guide.hidden && id === eventId) open.setAttribute('aria-current', 'page');
       const remove = $('.pinned-remove', item);
       remove.dataset.eventId = id;
       remove.dataset.identity = identity;
@@ -242,6 +332,10 @@ function renderHome() {
     status.classList.toggle('closed', closed || !event.slots.length);
     status.textContent = closed ? '確定済み' : event.slots.length ? '受付中' : '準備中';
     const isShared = event.responseVersion !== undefined;
+    const remove = $('[data-action=delete-listed-event]', item);
+    remove.dataset.eventId = event.id;
+    remove.dataset.shared = String(isShared);
+    remove.setAttribute('aria-label', `「${event.title}」を削除`);
     const mode = cloud ? (isShared ? '共有 · ' : 'ローカル · ') : '';
     const count = event.responseCount ?? responses.length;
     $('[data-event-summary]', item).textContent = mode + '候補 ' + event.slots.length + '件 · 回答 ' + count + '人';
@@ -249,7 +343,7 @@ function renderHome() {
       const { date, start, end } = event.final;
       const final = $('[data-event-final]', item);
       final.hidden = false;
-      final.textContent = '確定 ' + dateText(date) + ' ' + rangeText(start, end);
+      final.textContent = '確定 ' + dateText(date) + ' ' + candidateTime(start, end);
     }
     list.append(item);
   }
@@ -279,24 +373,17 @@ function render() {
   const home = screen === 'home';
   renderPins();
   const shared = Boolean(cloud && (home || store === cloud));
-  $('#mode-label').textContent = shared ? '共有モード' : 'ローカルデモ';
-  $('#storage-note').textContent = shared ? '保存済みの回答を、同じイベントのURLで共有します' : 'デモの回答はこのブラウザに保存されます';
-  const homeButton = $('#go-home');
-  const sampleButton = $('#sample');
-  if (!home && eventId === sampleId) sampleButton.setAttribute('aria-current', 'page');
-  else sampleButton.removeAttribute('aria-current');
+  updateNavigation();
   header.hidden = home;
   nav.hidden = home;
   if (home) {
-    homeButton.setAttribute('aria-current', 'page');
     view.setAttribute('aria-labelledby', 'view-title');
-    document.title = 'イベント一覧 | よせる';
+    document.title = 'イベント一覧 | よせあい';
     renderHome();
     return;
   }
-  homeButton.removeAttribute('aria-current');
   if (!record) {
-    header.innerHTML = '<div><h1>イベントが見つかりません</h1><p>このブラウザに保存されているイベントを開くか、回答入りデモをお試しください。</p></div>';
+    header.innerHTML = '<div><h1>イベントが見つかりません</h1></div>';
     nav.replaceChildren();
     const hint = shared ? 'イベントを作った人から、共有モードのリンクを受け取ってください。' :
       'ローカルデモで作ったイベントは、作成したブラウザで開けます。';
@@ -305,7 +392,7 @@ function render() {
     return;
   }
   view.setAttribute('aria-labelledby', 'view-title');
-  document.title = event().title + ' | よせる';
+  document.title = event().title + ' | よせあい';
   const closed = event().status === 'closed';
   const content = template('event');
   $('#event-title', content).textContent = event().title;
@@ -329,8 +416,7 @@ function render() {
   if (closed) {
     $('.final-banner', content).hidden = false;
     const final = event().final;
-    $('#final-time', content).textContent = dateText(final.date) + ' ' + rangeText(final.start, final.end);
-    $('#final-attendance', content).textContent = final.count + '人参加可能 · 回答受付終了';
+    $('#final-time', content).textContent = dateText(final.date) + ' ' + candidateTime(final.start, final.end);
     $('[data-action=reopen]', content).hidden = !owner();
   }
   header.replaceChildren(content);
@@ -356,20 +442,20 @@ function renderCalendar() {
       '<button type="button" class="weekday" data-action="weekday" data-value="' + i + '" aria-label="この月の' + day + '曜日を一括選択・解除" aria-pressed="' +
       dates.filter(iso => dateUTC(iso).getUTCDay() === i).every(iso => org.dates.has(iso)) + '">' + day + '</button>').join('') +
     '<span class="blank-day" aria-hidden="true"></span>'.repeat(start) + dates.map((iso, index) => {
-      const added = event().slots.some(slot => slot.date === iso);
+      const added = org.slots.some(slot => slot.date === iso);
       return '<button type="button" class="day' + (added ? ' has-slot' : '') + '" data-action="date" data-date="' + iso +
         '" aria-label="' + dateText(iso) + (added ? ' 登録済み候補あり' : '') + '" aria-pressed="' + org.dates.has(iso) + '">' + (index + 1) + '</button>';
     }).join('') + '</div>';
 }
 
-function timeField(prefix, title) {
+function timeField(prefix, title, hour, minute) {
   const content = template('clock-field');
-  for (const [part, unit, count, step] of [['h', '時', 24, 1], ['m', '分', 6, 10]]) {
+  for (const [part, unit, count, step] of [['h', '時', 24, 1], ['m', '分', 12, 5]]) {
     const key = prefix + part;
     const input = $('[data-clock="' + part + '"]', content);
     input.id = key;
     input.dataset.clock = key;
-    input.value = org.time[key];
+    input.value = part === 'h' ? hour : minute;
     input.setAttribute('aria-label', title + 'の' + unit);
     const options = $('[data-clock-options="' + part + '"]', content);
     options.setAttribute('aria-label', title + 'の' + unit + 'の選択肢');
@@ -388,7 +474,7 @@ function timeField(prefix, title) {
 }
 
 function slotList(editable) {
-  const slots = event().slots;
+  const slots = org.slots;
   if (!slots.length) return empty('候補はまだありません', '日付と時間を指定して、最初の候補を登録してください。');
   return '<div class="slot-list">' + slots.map(slot => '<label class="slot-row">' +
     (editable ? '<input type="checkbox" data-slot="' + slot.id + '"' + (org.selected.has(slot.id) ? ' checked' : '') + '>' : '') +
@@ -399,20 +485,15 @@ function slotList(editable) {
 function renderOrganizer() {
   const content = template('organizer');
   const closed = event().status === 'closed';
-  const slotCount = event().slots.length;
+  const slotCount = org.slots.length;
   const editing = org.selected.size > 0;
   $('#organizer-locked', content).hidden = !closed;
   $('#organizer-edit-note', content).hidden = closed || !event().locked;
   const settings = $('.event-settings', content);
-  const previousSettings = $('.event-settings', view);
-  settings.dataset.eventId = eventId;
-  settings.hidden = closed || event().locked;
-  settings.open = previousSettings?.dataset.eventId === eventId ? previousSettings.open : !slotCount;
+  settings.hidden = closed;
   $('#organizer-memo', content).value = org.memo;
-  if (settings.hidden) {
-    $('[data-action=settings]', content).textContent = 'メモを保存';
-    $('#settings-save-help', content).textContent = 'このイベントの概要を保存します。';
-  }
+  $('[data-action=delete-event]', content).hidden = eventId === sampleId;
+  updateOrganizerSaveStatus(content);
   $('.organizer-grid', content).hidden = closed;
   $('#calendar-section', content).hidden = editing;
   $('#time-section', content).setAttribute('aria-labelledby', editing ? 'edit-time-title' : 'add-time-title');
@@ -433,7 +514,7 @@ function renderOrganizer() {
 
     for (const field of $$('[data-clock-field]', content)) {
       const prefix = field.dataset.clockField;
-      field.replaceWith(timeField(prefix, prefix === 's' ? '開始' : '終了'));
+      field.replaceWith(timeField(prefix, prefix === 's' ? '開始' : '終了', org.time[prefix + 'h'], org.time[prefix + 'm']));
     }
     $('#end-time', content).hidden = !org.hasEnd;
     $('#has-end', content).checked = org.hasEnd;
@@ -451,6 +532,7 @@ function renderOrganizer() {
   if (!settings.hidden && org.checkedSettings) checkSettings(content);
 
   $('#registered-count', content).textContent = slotCount + '件';
+  if (organizerChanges().changes.slots) $('#registered-label', content).textContent = '候補一覧（未保存）';
   $('#registered-slots', content).innerHTML = slotList(!closed);
   $('#slot-list-tools', content).hidden = closed || !slotCount;
   $('#all-slots', content).checked = slotCount > 0 && org.selected.size === slotCount;
@@ -492,9 +574,16 @@ function slider(slot, key, answer) {
 function answerControls(slot, answer) {
   const content = template('time-compare');
   const date = dateText(slot.date);
-  $('[data-original]', content).textContent = date + ' ' + rangeText(slot.start, slot.end);
-  $('[data-available]', content).textContent = date + ' ' + rangeText(...Schedule.availability(slot, answer));
-  $('.sliders', content).innerHTML = slider(slot, 'from', answer) + slider(slot, 'to', answer);
+  const openEnded = slot.end === null;
+  $('[data-original]', content).textContent = date + ' ' + rangeText(slot.start, slot.end) + (openEnded ? ' 終了未定' : '');
+  $('[data-available]', content).textContent = date + ' ' + availabilityText(Schedule.availability(slot, answer));
+  $('.sliders', content).innerHTML = slider(slot, 'from', answer) + (openEnded ? '' : slider(slot, 'to', answer));
+  if (openEnded) {
+    $('[data-limit]', content).hidden = false;
+    $('[data-until-day]', content).value = answer.untilDay ?? (answer.until >= Schedule.DAY ? '1' : '0');
+    const [hour, minute] = answer.untilClock ?? (answer.until == null ? ['', ''] : minutesText(answer.until).split(':'));
+    $('[data-limit-clock]', content).replaceWith(timeField('limit-' + slot.id + '-', '上限', hour, minute));
+  }
   $('[data-slot-error]', content).id = 'time-error-' + slot.id;
   return content;
 }
@@ -514,11 +603,18 @@ function answerCard(slot, answer) {
 
   const yesBuffer = $('[data-yes-buffer]', content);
   const maybeBuffer = $('[data-maybe-buffer]', content);
-  if (slot.end !== null && answer?.mark === 'yes') {
+  const adjustment = $('.answer-adjustment', content);
+  adjustment.hidden = answer?.mark !== 'yes' && answer?.mark !== 'maybe';
+  if (answer?.mark === 'yes') {
     yesBuffer.hidden = false;
+    if (slot.end === null) {
+      $('[data-buffer-title]', yesBuffer).textContent = '開始時刻の余裕';
+      $('[data-action=zero-buffer]', yesBuffer).textContent = '開始を0分に戻す';
+      $('.hint', yesBuffer).textContent = '調整しなければ、元の開始時刻で回答します。';
+    }
     yesBuffer.append(answerControls(slot, answer));
   } else yesBuffer.remove();
-  if (slot.end !== null && answer?.mark === 'maybe') {
+  if (answer?.mark === 'maybe') {
     maybeBuffer.hidden = false;
     maybeBuffer.append(answerControls(slot, answer));
   } else maybeBuffer.remove();
@@ -563,15 +659,20 @@ function updateAnswerStatus() {
     const missing = !answer?.mark;
     if (!missing) filled++;
     const missingError = missing && current.checked ? error : '';
-    const timeError = missing ? '' : error;
+    const partialLimit = answer?.untilClock?.some(Boolean) && answer.until === null;
+    const timeError = missing ? '' : partialLimit ? '上限時刻の時と分を半角数字で入力してください。' : error;
+    $('[data-adjustment-error]', card).hidden = !timeError;
     const group = $('.choices', card);
     showInputError([group], $('[data-answer-required]', card), missingError);
     const timing = $('[data-slot-error]', card);
-    const sliders = $$('[data-offset]', card);
-    if (timing) showInputError(sliders, timing, timeError);
+    const limitFields = $$('[data-limit] [data-clock]', card);
+    const timeFields = [...$$('[data-offset]', card), ...limitFields];
+    const invalidFields = partialLimit ? limitFields.filter(field => field.dataset.clock.endsWith('h')
+      ? Schedule.readClock(field.value, '0') === null : Schedule.readClock('0', field.value) === null) : timeFields;
+    if (timing) showInputError(timeFields, timing, timeError, invalidFields);
     card.classList.toggle('has-error', Boolean(missingError || timeError));
     if (missingError) firstError ??= $('[data-mark=yes]', group);
-    if (timeError) firstError ??= sliders[0] ?? $('[data-mark=yes]', group);
+    if (timeError) firstError ??= (partialLimit ? invalidFields[0] : limitFields[0]) ?? timeFields[0] ?? $('[data-mark=yes]', group);
   });
   $('#answer-count').textContent = filled + ' / ' + slots.length + ' 件に回答';
   $('#answer-note').textContent = firstError ? '赤く表示された項目を確認してください。' :
@@ -592,7 +693,7 @@ function resultTable() {
         if (!answer) return '<td><small>未回答</small></td>';
         counts[answer.mark]++;
         const interval = Schedule.availability(slot, answer);
-        return '<td>' + badge(answer.mark) + (interval ? '<small class="numbers">' + rangeText(...interval) + '</small>' : '') + '</td>';
+        return '<td>' + badge(answer.mark) + (interval ? '<small class="numbers">' + availabilityText(interval) + '</small>' : '') + '</td>';
       }).join('');
       return '<tr><th scope="row">' + dateText(slot.date) + '<small class="numbers">' + rangeText(slot.start, slot.end) +
         (slot.end === null ? ' 終了未定' : '') + '</small></th>' + cells +
@@ -618,16 +719,17 @@ function renderResults() {
     const originalYes = record.responses.filter(person => person.answers[item.slot.id]?.mark === 'yes').length;
     $('.proposal', card).classList.toggle('best', index === 0);
     $('.rank', card).textContent = index + 1;
-    $('[data-source-time]', card).textContent = dateText(item.slot.date) + ' ' + rangeText(item.slot.start, item.slot.end);
+    $('[data-source-time]', card).textContent = dateText(item.slot.date) + ' ' + candidateTime(item.slot.start, item.slot.end);
     $('[data-original-yes]', card).textContent = originalYes;
     $('[data-proposed-date]', card).textContent = dateText(item.slot.date);
-    $('[data-proposed-time]', card).textContent = rangeText(item.start, item.end);
-    $('[data-duration]', card).textContent = item.end - item.start;
+    $('[data-proposed-time]', card).textContent = candidateTime(item.start, item.end);
+    $('[data-duration]', card).textContent = item.end === null ? '' : (item.end - item.start) + '分 · ';
     $('[data-people]', card).textContent = item.people.map(person => person.name).join('、');
     $('[data-attending]', card).textContent = item.people.length;
     $('[data-total]', card).textContent = responseCount;
     const finalize = $('[data-action=finalize]', card);
     finalize.dataset.index = index;
+    if (index === 0) finalize.classList.replace('secondary', 'primary');
     finalize.closest('td').hidden = !canFinalize;
     return card;
   });
@@ -674,9 +776,9 @@ function checkSettings(root = view) {
   return firstError;
 }
 
-function ask(title, content, action, button) {
+function ask(title, content, action, button, cancel = '閉じる') {
   dialog.innerHTML = '<h2 id="dialog-title">' + title + '</h2>' + content + '<div class="actions">' +
-    btn('閉じる', 'close-dialog', 'secondary') + (action ? btn(button, action, 'primary') : '') + '</div>';
+    btn(cancel, 'close-dialog', 'secondary') + (action ? btn(button, action, 'primary') : '') + '</div>';
   dialog.showModal();
 }
 
@@ -704,7 +806,7 @@ function closeClocks() {
 function updateClockChoices(combo) {
   for (const group of $$('.clock-options', combo)) {
     const options = $$('button', group);
-    const value = org.time[options[0].dataset.key];
+    const value = $('#' + options[0].dataset.key, combo).value;
     const selected = value && options.find(option => option.dataset.value === pad(value));
     for (const option of options) {
       option.setAttribute('aria-pressed', String(option === selected));
@@ -720,25 +822,33 @@ function focusClockChoice(combo, part) {
 function openClock(combo, part = 'h') {
   closeClocks();
   updateClockChoices(combo);
-  $('.combo-list', combo).hidden = false;
+  const list = $('.combo-list', combo);
+  list.hidden = false;
+  const bounds = combo.getBoundingClientRect();
+  const roomBelow = window.innerHeight - bounds.bottom;
+  list.classList.toggle('above', roomBelow < list.offsetHeight + 4 && bounds.top > roomBelow);
   $('.combo-toggle', combo).setAttribute('aria-expanded', 'true');
   focusClockChoice(combo, part);
 }
 
 function setClock(button) {
   const { key, value } = button.dataset;
-  org.time[key] = value;
-  const input = $('#' + key);
+  const combo = button.closest('.combo');
+  const input = $('#' + key, combo);
   input.value = value;
-  if (org.checkedSlots) checkSlotInputs();
+  input.dispatchEvent(new Event('input', { bubbles: true }));
   if (key.endsWith('h')) {
-    const combo = button.closest('.combo');
-    updateClockChoices(combo);
     focusClockChoice(combo, 'm');
   } else {
     closeClocks();
     input.focus({ preventScroll: true });
   }
+}
+
+function markSlotInputChanged() {
+  if (org.selected.size) org.editPending = true;
+  else org.addTimeChanged = true;
+  updateOrganizerSaveStatus();
 }
 
 function checkSlotInputs(root = view) {
@@ -773,11 +883,11 @@ function setSelectedSlots(selected) {
   org.checkedSlots = false;
   if (selected.size === 1) {
     const [id] = selected;
-    if (org.selected.size !== 1 || !org.selected.has(id)) org.editDate = event().slots.find(slot => slot.id === id).date;
+    if (org.selected.size !== 1 || !org.selected.has(id)) org.editDate = org.slots.find(slot => slot.id === id).date;
   }
   org.selected = selected;
   if (selected.size && !org.addDraft) {
-    const first = event().slots.find(slot => selected.has(slot.id));
+    const first = org.slots.find(slot => selected.has(slot.id));
     org.addDraft = { time: org.time, hasEnd: org.hasEnd };
     const [sh, sm] = minutesText(first.start).split(':');
     const [eh, em] = minutesText(first.end ?? first.start + 60).split(':');
@@ -788,27 +898,29 @@ function setSelectedSlots(selected) {
     org.time = org.addDraft.time;
     org.hasEnd = org.addDraft.hasEnd;
     org.addDraft = null;
+    org.editPending = false;
   }
 }
 
-async function saveSlots(editing) {
+function stageSlots(editing) {
   if (editing && !org.selected.size) throw new Error('編集する候補を選んでください。');
   $('#org-error').hidden = true;
   org.checkedSlots = true;
   const { firstError, start, end } = checkSlotInputs();
-  if (firstError) { firstError.focus(); return; }
+  if (firstError) { firstError.focus(); return false; }
   const time = { start, end };
-  const old = event().slots;
+  const old = org.slots;
   const editDate = editing && org.selected.size === 1 ? org.editDate : null;
   const slots = editing ? old.map(slot => org.selected.has(slot.id) ? { ...slot, ...time, date: editDate ?? slot.date } : slot) :
     old.concat([...org.dates].map(date => ({ id: store.id(), date, ...time })));
   const keys = slots.map(slot => [slot.date, slot.start, slot.end].join('/'));
   if (new Set(keys).size < keys.length) throw new Error('同じ日付・時刻の候補がすでにあります。時間を変えるか、日付の選択を見直してください。');
-  await store.update(eventId, uid, event().revision, { slots: slots.sort(Schedule.slotOrder) });
+  org.slots = slots.sort(Schedule.slotOrder);
   org.checkedSlots = false;
   if (editing) setSelectedSlots(new Set());
-  render();
-  toast(editing ? '選択した候補を更新しました。' : org.dates.size + '件の候補を追加しました。');
+  else org.addPending = org.addTimeChanged = false;
+  renderOrganizer();
+  return true;
 }
 
 function selectMark(button) {
@@ -816,11 +928,19 @@ function selectMark(button) {
   const slot = event().slots.find(item => item.id === card.dataset.answer);
   const current = draft();
   const mark = button.dataset.mark;
-  if (current.answers[slot.id]?.mark === mark) return;
+  if (current.answers[slot.id]?.mark === mark) {
+    const adjustment = $('.answer-adjustment:not([hidden])', card);
+    if (adjustment) adjustment.open = true;
+    return;
+  }
   current.answers[slot.id] = { mark };
   current.dirty = true;
-  card.replaceWith(answerCard(slot, current.answers[slot.id]));
-  $('[data-answer="' + slot.id + '"] [data-mark="' + mark + '"]').focus();
+  const next = answerCard(slot, current.answers[slot.id]);
+  const adjustment = $('.answer-adjustment', next);
+  const choice = $('[data-mark="' + mark + '"]', next);
+  card.replaceWith(next);
+  if (!adjustment.hidden) adjustment.open = true;
+  choice.focus();
   $('#answer-error').hidden = true;
   updateAnswerStatus();
 }
@@ -840,11 +960,69 @@ function showShare(saved = false) {
   dialog.showModal();
 }
 
+let pendingOrganizer;
+let pendingNavigation;
+let pendingDeletion;
+
+function confirmEventDeletion(destination, id, identity, title) {
+  pendingDeletion = { destination, id, identity };
+  ask('イベントを削除しますか？', '<p>「' + esc(title) + '」を削除すると、共有リンクから開けなくなります。</p>' +
+    '<p id="delete-event-error" class="error" role="alert" hidden></p>',
+    'confirm-delete-event', 'イベントを削除する', 'キャンセル');
+}
+
+function reviewOrganizer() {
+  while (pendingSlotEdit()) {
+    if (event().status === 'closed') throw new Error('受付を再開してから候補を変更してください。');
+    if (!stageSlots(org.selected.size > 0)) return;
+  }
+  const { changes, entries } = organizerChanges();
+  if (event().status === 'open') {
+    org.checkedSettings = true;
+    const firstError = checkSettings();
+    if (firstError) {
+      firstError.focus();
+      return;
+    }
+    org.checkedSettings = false;
+  } else if (Object.keys(changes).some(key => key !== 'memo')) {
+    throw new Error('受付を再開してからイベント設定や候補を変更してください。');
+  }
+  if (!entries.length) { showShare(); return; }
+  pendingOrganizer = { id: eventId, base: org.base, changes };
+  $('[data-action=settings]').focus({ preventScroll: true });
+  ask('変更内容を確認', '<p>保存すると、下記の変更が参加者にも反映されます。</p><ul class="change-list">' +
+    entries.map(entry => '<li>' + esc(entry) + '</li>').join('') + '</ul><p id="organizer-save-error" class="error" role="alert" hidden></p>',
+    'confirm-organizer', '保存する', '編集を続ける');
+}
+
+function confirmNavigation(navigate) {
+  if (!hasUnsavedOrganizer()) return false;
+  closeMenu(true);
+  if (dialog.open) dialog.close();
+  pendingNavigation = navigate;
+  ask('変更が保存されていません', '<p>この画面を離れると、保存していない候補や設定の変更が破棄されます。</p>',
+    'discard-organizer', '保存せずに移動', '編集を続ける');
+  return true;
+}
+
 let pendingFinal;
+function focusFinalBanner() {
+  if (!focusFinalEventId || eventId !== focusFinalEventId || !guide.hidden) return;
+  const heading = $('#final-heading');
+  if (!heading || heading.closest('.final-banner').hidden) return;
+  focusFinalEventId = null;
+  heading.focus();
+}
 let pendingReopen;
 const actions = {
-  home: () => { if (screen !== 'home') openHome(); else closeMenu(true); },
-  'toggle-menu': button => button.setAttribute('aria-expanded', button.getAttribute('aria-expanded') !== 'true'),
+  home: () => {
+    if (screen !== 'home') openHome();
+    else if (!guide.hidden) actions['leave-help']();
+    else closeMenu(true);
+  },
+  'toggle-menu': button => setMenu(button.getAttribute('aria-expanded') !== 'true'),
+  'close-menu': () => closeMenu(true),
   'new-event': async () => {
     const destination = cloud || DemoStore;
     openEvent(await destination.create(destination.identity()), 'organizer');
@@ -868,8 +1046,14 @@ const actions = {
   'focus-editor': () => $(org.selected.size ? '#edit-time-title' : '#calendar-title').focus(),
   share: () => showShare(),
   help: () => {
-    dialog.replaceChildren(template('help'));
-    dialog.showModal();
+    closeMenu();
+    setGuide(true);
+    $('#guide-title').focus();
+  },
+  'leave-help': () => {
+    closeMenu();
+    setGuide(false);
+    ($('#view-title') ?? $('#main')).focus();
   },
   'close-dialog': () => dialog.close(),
   copy: async () => {
@@ -887,73 +1071,77 @@ const actions = {
   date: button => {
     const { date } = button.dataset;
     org.dates.has(date) ? org.dates.delete(date) : org.dates.add(date);
+    org.addPending = true;
     renderOrganizer();
     $('[data-date="' + date + '"]').focus();
   },
-  weekday: button => { toggleWeekday(+button.dataset.value); renderOrganizer(); $('[data-action=weekday][data-value="' + button.dataset.value + '"]').focus(); },
-  'clear-dates': () => { org.dates.clear(); renderOrganizer(); $('.weekday').focus(); },
+  weekday: button => { toggleWeekday(+button.dataset.value); org.addPending = true; renderOrganizer(); $('[data-action=weekday][data-value="' + button.dataset.value + '"]').focus(); },
+  'clear-dates': () => { org.dates.clear(); org.addPending = false; renderOrganizer(); $('.weekday').focus(); },
   clock: button => {
     const combo = button.closest('.combo');
     if (button.getAttribute('aria-expanded') === 'true') closeClocks();
     else openClock(combo);
   },
   'clock-value': setClock,
-  settings: async () => {
-    const savingSettings = !event().locked && event().status === 'open';
-    const savingEventId = eventId;
-    const changes = {};
-    const memoInput = org.memo;
-    const memo = memoInput.trim();
-    if (memo !== org.savedMemo) changes.memo = memo;
-    if (savingSettings) {
-      org.checkedSettings = true;
-      const firstError = checkSettings();
-      if (firstError) {
-        $('.event-settings').open = true;
-        firstError.focus();
-        return;
-      }
-      const title = org.title.trim();
-      const minimum = +org.minimum;
-      const minimumPeople = +org.minimumPeople;
-      org.checkedSettings = false;
-      if (title !== event().title || minimum !== event().minimum || minimumPeople !== (event().minimumPeople ?? 1)) {
-        Object.assign(changes, { title, minimum, minimumPeople });
-      }
+  settings: reviewOrganizer,
+  'confirm-organizer': async () => {
+    const { id, base, changes } = pendingOrganizer;
+    const before = record;
+    const saved = await store.update(id, uid, base.revision, changes, base.memo ?? '');
+    if (eventId !== id || screen !== 'organizer' || !record) return;
+    if (record === before || event().revision < saved.revision) record = { ...record, event: saved };
+    else if (changes.memo !== undefined && event().revision === saved.revision && (event().memo ?? '') === (base.memo ?? '')) {
+      record = { ...record, event: { ...event(), memo: saved.memo } };
     }
-    if (!Object.keys(changes).length) {
-      if (savingSettings) showShare();
-      else toast('変更はありません。');
-      return;
-    }
-    await store.update(eventId, uid, event().revision, changes, org.savedMemo);
-    if (eventId !== savingEventId || screen !== 'organizer') return;
-    if (changes.memo !== undefined) {
-      org.savedMemo = memo;
-      if (org.memo === memoInput) {
-        org.memo = memo;
-        $('#organizer-memo').value = memo;
-      }
-    }
-    if (savingSettings) {
+    resetOrganizer();
+    dialog.close();
+    if (event().status === 'open') setScreen('answer');
+    else {
+      render();
       $('[data-action=settings]').focus({ preventScroll: true });
-      showShare(true);
-    } else toast('イベント概要を保存しました。');
+    }
+    if (!base.slots.length) showShare(true);
+    else toast('変更を保存しました。');
   },
-  'add-slots': () => saveSlots(false),
-  'apply-edit': () => saveSlots(true),
+  'discard-organizer': async () => {
+    resetOrganizer();
+    const navigate = pendingNavigation;
+    pendingNavigation = null;
+    dialog.close();
+    await navigate();
+  },
+  'add-slots': () => stageSlots(false),
+  'apply-edit': () => stageSlots(true),
   'cancel-edit': () => {
     setSelectedSlots(new Set());
     renderOrganizer();
     $('[data-action=add-slots]').focus();
   },
-  'delete-slots': () => ask('候補を削除しますか？', '<p>選んだ ' + org.selected.size + ' 件の候補を削除します。</p>', 'confirm-delete', '削除する'),
-  'confirm-delete': async () => {
-    await store.update(eventId, uid, event().revision, { slots: event().slots.filter(slot => !org.selected.has(slot.id)) });
+  'delete-slots': () => {
+    org.slots = org.slots.filter(slot => !org.selected.has(slot.id));
     setSelectedSlots(new Set());
+    renderOrganizer();
+    $('#jump-to-editor').focus();
+  },
+  'delete-event': () => confirmEventDeletion(store, eventId, uid, event().title),
+  'delete-listed-event': button => {
+    const destination = button.dataset.shared === 'true' ? cloud : DemoStore;
+    const identity = destination.identity();
+    const target = destination.listOwned(identity).find(item => item.event.id === button.dataset.eventId);
+    if (!target) throw new Error('イベントが見つかりません。');
+    confirmEventDeletion(destination, target.event.id, identity, target.event.title);
+  },
+  'confirm-delete-event': async () => {
+    const { destination, id, identity } = pendingDeletion;
+    await destination.deleteEvent(id, identity);
+    pendingDeletion = null;
+    forgetEvent(id, identity);
     dialog.close();
-    render();
-    toast('選択した候補を削除しました。');
+    if (screen === 'home') {
+      render();
+      $('#view-title').focus({ preventScroll: true });
+    } else if (eventId === id) openHome();
+    toast('イベントを削除しました。');
   },
   mark: selectMark,
   'zero-buffer': button => {
@@ -964,8 +1152,12 @@ const actions = {
     answer.from = 0;
     answer.to = 0;
     current.dirty = true;
-    card.replaceWith(answerCard(slot, answer));
-    $('[data-answer="' + slot.id + '"] [data-action=zero-buffer]').focus();
+    const next = answerCard(slot, answer);
+    const adjustment = $('.answer-adjustment', next);
+    const reset = $('[data-action=zero-buffer]', next);
+    card.replaceWith(next);
+    adjustment.open = true;
+    reset.focus();
     $('#answer-error').hidden = true;
     updateAnswerStatus();
   },
@@ -974,7 +1166,12 @@ const actions = {
     $('#answer-error').hidden = true;
     current.checked = true;
     const firstError = updateAnswerStatus();
-    if (firstError) { firstError.focus(); return; }
+    if (firstError) {
+      const adjustment = firstError.closest('.answer-adjustment');
+      if (adjustment) adjustment.open = true;
+      firstError.focus();
+      return;
+    }
     await store.submit(eventId, uid, current.revision, current);
     if (uid === baseUid) rememberPersonalEvent(true);
     current.dirty = false;
@@ -986,18 +1183,23 @@ const actions = {
   finalize: button => {
     pendingFinal = Schedule.proposals(event(), record.responses)[+button.dataset.index];
     if (!pendingFinal) throw new Error('最新の提案を確認してください。');
-    ask('この日程で確定しますか？', '<p><strong>' + dateText(pendingFinal.slot.date) + ' ' + rangeText(pendingFinal.start, pendingFinal.end) +
-      '</strong></p><p>確定すると回答の受付を終了し、全員の画面に確定日時を表示します。</p>', 'confirm-final', '確定して受付終了');
+    ask('この日程で確定しますか？', '<p class="confirm-time">' + dateText(pendingFinal.slot.date) + ' ' + candidateTime(pendingFinal.start, pendingFinal.end) +
+      '</p><p>確定すると回答の受付を終了し、全員の画面に確定日時を表示します。</p>', 'confirm-final', '確定して受付終了');
   },
   'confirm-final': async () => {
-    await store.finalize(eventId, uid, pendingFinal);
+    const id = eventId;
+    await store.finalize(id, uid, pendingFinal);
     dialog.close();
+    if (id === eventId) {
+      focusFinalEventId = id;
+      focusFinalBanner();
+    }
     toast('日程を確定しました。');
   },
   reopen: () => {
     pendingReopen = event().final;
     ask('日程の確定を取り消しますか？',
-      '<p><strong>' + dateText(pendingReopen.date) + ' ' + rangeText(pendingReopen.start, pendingReopen.end) +
+      '<p><strong>' + dateText(pendingReopen.date) + ' ' + candidateTime(pendingReopen.start, pendingReopen.end) +
       '</strong></p><p>回答受付を再開します。保存済みの回答から引き続き調整できます。</p>',
       'confirm-reopen', '取り消して受付再開');
   },
@@ -1009,17 +1211,23 @@ const actions = {
   }
 };
 
+const organizerNavigation = new Set(['home', 'new-event', 'open-event', 'view']);
+
 document.addEventListener('click', async evt => {
   if (!evt.target.closest('.combo')) closeClocks();
   const button = evt.target.closest('button[data-action]');
   if (!button || button.disabled || busy) return;
   const action = button.dataset.action;
+  const navigate = () => actions[action](button);
+  if (organizerNavigation.has(action) && !(action === 'view' && button.dataset.key === screen) && confirmNavigation(navigate)) return;
   busy = true;
   try {
-    await actions[action](button);
+    await navigate();
   } catch (error) {
     const message = connectionError(error);
     if (action === 'save-answer') errorAt('#answer-error', message);
+    else if (action === 'confirm-organizer') errorAt('#organizer-save-error', message);
+    else if (action === 'confirm-delete-event') errorAt('#delete-event-error', message);
     else if (['apply-edit', 'add-slots'].includes(action)) errorAt('#org-error', message);
     else toast(message);
   } finally {
@@ -1060,8 +1268,9 @@ view.addEventListener('focusout', evt => {
 
 view.addEventListener('input', evt => {
   const field = evt.target;
+  const limit = field.closest('[data-limit]');
   if (field.dataset.clock) {
-    org.time[field.dataset.clock] = field.value;
+    if (!limit) org.time[field.dataset.clock] = field.value;
     const combo = field.closest('.combo');
     if (!$('.combo-list', combo).hidden) updateClockChoices(combo);
   }
@@ -1070,8 +1279,12 @@ view.addEventListener('input', evt => {
   if (field.id === 'minimum-people') org.minimumPeople = field.value;
   if (field.id === 'organizer-memo') org.memo = field.value;
   if (field.id === 'edit-date') org.editDate = field.value;
+  if (screen === 'organizer') {
+    if (field.dataset.clock || field.id === 'edit-date') markSlotInputChanged();
+    else if (['event-name', 'minimum', 'minimum-people', 'organizer-memo'].includes(field.id)) updateOrganizerSaveStatus();
+  }
   if (org?.checkedSettings && ['event-name', 'minimum', 'minimum-people'].includes(field.id)) checkSettings();
-  if (org?.checkedSlots && (field.dataset.clock || field.id === 'edit-date')) {
+  if (screen === 'organizer' && org.checkedSlots && (field.dataset.clock || field.id === 'edit-date')) {
     $('#org-error').hidden = true;
     checkSlotInputs();
   }
@@ -1082,17 +1295,24 @@ view.addEventListener('input', evt => {
     $('#answer-error').hidden = true;
     updateAnswerStatus();
   }
-  if (field.dataset.offset) {
+  if (field.dataset.offset || limit) {
     const card = field.closest('[data-answer]');
     const slot = event().slots.find(item => item.id === card.dataset.answer);
     const current = draft();
     const answer = current.answers[slot.id];
-    const value = +field.value;
-    answer[field.dataset.offset] = value;
+    if (field.dataset.offset) {
+      const value = +field.value;
+      answer[field.dataset.offset] = value;
+      $('#shift-' + field.dataset.offset + '-' + slot.id).textContent = shiftText(value);
+      field.setAttribute('aria-valuetext', shiftText(value));
+    } else {
+      answer.untilDay = $('[data-until-day]', limit).value;
+      answer.untilClock = $$('[data-clock]', limit).map(input => input.value);
+      const clock = Schedule.readClock(...answer.untilClock);
+      answer.until = clock === null ? null : +answer.untilDay * Schedule.DAY + clock;
+    }
     current.dirty = true;
-    $('#shift-' + field.dataset.offset + '-' + slot.id).textContent = shiftText(value);
-    field.setAttribute('aria-valuetext', shiftText(value));
-    $('[data-available]', card).textContent = dateText(slot.date) + ' ' + rangeText(...Schedule.availability(slot, answer));
+    $('[data-available]', card).textContent = dateText(slot.date) + ' ' + availabilityText(Schedule.availability(slot, answer));
     $('#answer-error').hidden = true;
     updateAnswerStatus();
   }
@@ -1101,15 +1321,21 @@ view.addEventListener('input', evt => {
 document.addEventListener('change', evt => {
   const field = evt.target;
   if (field.id === 'profile') {
-    if (field.value === 'new') {
-      uid = DemoStore.addProfile(eventId);
-      simulated.push(uid);
-    } else uid = field.value;
-    setScreen(owner() && screen === 'organizer' ? 'organizer' : 'answer');
+    const value = field.value;
+    const changeProfile = () => {
+      if (value === 'new') {
+        uid = DemoStore.addProfile(eventId);
+        simulated.push(uid);
+      } else uid = value;
+      setScreen(owner() && screen === 'organizer' ? 'organizer' : 'answer');
+    };
+    if (confirmNavigation(changeProfile)) field.value = uid;
+    else changeProfile();
     return;
   }
   if (field.id === 'has-end') {
     org.hasEnd = field.checked;
+    markSlotInputChanged();
     renderOrganizer();
     $('#has-end').focus();
   }
@@ -1121,7 +1347,7 @@ document.addEventListener('change', evt => {
     $('[data-slot="' + field.dataset.slot + '"]').focus();
   }
   if (field.id === 'all-slots') {
-    setSelectedSlots(new Set(field.checked ? event().slots.map(slot => slot.id) : []));
+    setSelectedSlots(new Set(field.checked ? org.slots.map(slot => slot.id) : []));
     renderOrganizer();
     $('#all-slots').focus();
   }
@@ -1129,13 +1355,16 @@ document.addEventListener('change', evt => {
 
 function refreshEvent(next) {
   const previous = record;
+  const keepOrganizer = hasUnsavedOrganizer();
   record = next;
+  if (!record) forgetEvent();
   rememberPersonalEvent();
-  if (record && org) {
-    const { memo, savedMemo } = org;
-    if (screen === 'organizer' && !busy && record.event.revision !== previous?.event.revision) resetOrganizer();
-    if (memo !== savedMemo) Object.assign(org, { memo, savedMemo });
-    else org.memo = org.savedMemo = event().memo ?? '';
+  if (record && org && !keepOrganizer) {
+    if (event().revision !== previous?.event.revision || event().status !== previous?.event.status) resetOrganizer();
+    else {
+      org.base = event();
+      org.memo = event().memo ?? '';
+    }
   }
   if (screen === 'answer' && record && previous && record.event.status === previous.event.status &&
       record.event.revision === previous.event.revision && draft().dirty) {
@@ -1145,6 +1374,7 @@ function refreshEvent(next) {
     return;
   }
   render();
+  focusFinalBanner();
 }
 
 DemoStore.subscribe(id => {
@@ -1155,12 +1385,23 @@ DemoStore.subscribe(id => {
   if (store === DemoStore && id === eventId) refreshEvent(DemoStore.get(id));
 });
 
-$('#sample').addEventListener('click', () => { if (!busy) openEvent(sampleId, 'results'); });
+matchMedia('(max-width: 820px)').addEventListener('change', evt => { if (!evt.matches) closeMenu(); });
+window.addEventListener('beforeunload', evt => {
+  if (hasUnsavedOrganizer()) {
+    evt.preventDefault();
+    evt.returnValue = '';
+  }
+});
 $('.skip').addEventListener('click', evt => {
   evt.preventDefault();
   $('#main').focus();
 });
 function restoreRoute() {
+  if (hasUnsavedOrganizer()) {
+    history.pushState({ eventId, screen }, '', shareURL());
+    confirmNavigation(() => history.back());
+    return;
+  }
   const id = eventFromURL();
   if (id) openEvent(id, history.state?.screen || 'answer', true);
   else openHome(true);
@@ -1168,7 +1409,7 @@ function restoreRoute() {
 async function start() {
   let failed = false;
   if (globalThis.YOSERU_FIREBASE_CONFIG) {
-    const controls = [$('#go-home'), $('#sample'), $('#new-event')];
+    const controls = [$('#go-home'), $('#new-event')];
     controls.forEach(control => { control.disabled = true; });
     renderLoading('共有モードに接続中…');
     try {

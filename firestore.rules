@@ -41,7 +41,6 @@ service cloud.firestore {
     function changesCandidates(before, after, keys) {
       return before.ownerUid == request.auth.uid && before.status == 'open'
         && keys.hasOnly(['title', 'memo', 'minimum', 'minimumPeople', 'slots', 'slotIds', 'revision', 'updatedAt'])
-        && (!before.locked || !keys.hasAny(['title', 'minimum', 'minimumPeople']))
         && after.revision == before.revision + 1 && validCandidates(after);
     }
 
@@ -49,13 +48,20 @@ service cloud.firestore {
       return before.ownerUid == request.auth.uid && keys.hasOnly(['memo', 'updatedAt']) && validMemo(after);
     }
 
+    function deletesEvent(before, after) {
+      return before.ownerUid == request.auth.uid && after.id == before.id && after.ownerUid == before.ownerUid
+        && after.status == 'deleted' && after.keys().hasOnly(['id', 'ownerUid', 'status', 'updatedAt']);
+    }
+
     function validFinal(event) {
       let final = event.final;
-      return final is map && final.keys().hasOnly(['slotId', 'date', 'start', 'end', 'count'])
+      return final is map && final.keys().hasOnly(['slotId', 'date', 'start', 'end', 'count', 'sourceStart'])
         && final.slotId in event.slotIds
         && final.date is string && final.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && final.start is int && final.end is int && final.start >= -120 && final.end < 1560
-        && final.end - final.start >= event.minimum
+        && final.start is int && final.start >= -120 && final.start < 1560
+        && ((final.end is int && final.end < 1560 && final.end - final.start >= event.minimum)
+          || (final.end == null && final.sourceStart is int
+            && {'id': final.slotId, 'date': final.date, 'start': final.sourceStart, 'end': null} in event.slots))
         && final.count is int && final.count >= event.get('minimumPeople', 1) && final.count <= event.responseCount;
     }
 
@@ -93,14 +99,15 @@ service cloud.firestore {
       allow get: if signedIn();
       allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if signedIn() && validNewEvent(id, request.resource.data);
-      allow update: if signedIn() && request.resource.data.updatedAt == request.time
-        && (changesCandidates(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
+      allow update: if signedIn() && resource.data.status != 'deleted' && request.resource.data.updatedAt == request.time
+        && (deletesEvent(resource.data, request.resource.data)
+          || changesCandidates(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
           || changesMemo(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
           || changesFinal(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
           || savesResponse(id, resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys()));
 
       match /responses/{uid} {
-        allow get, list: if signedIn() && exists(eventPath(id));
+        allow get, list: if signedIn() && exists(eventPath(id)) && get(eventPath(id)).data.status != 'deleted';
         allow create, update: if signedIn() && request.auth.uid == uid && validResponse(id, uid, request.resource.data);
       }
     }

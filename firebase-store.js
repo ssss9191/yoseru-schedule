@@ -60,7 +60,7 @@
       }
       const stopEvent = firestore.onSnapshot(eventRef(id), { includeMetadataChanges: true }, snapshot => {
         if (snapshot.metadata.hasPendingWrites) return;
-        if (!snapshot.exists()) {
+        if (!snapshot.exists() || snapshot.data().status === 'deleted') {
           currentEvent = null;
           currentResponses = null;
           stopResponses?.();
@@ -92,7 +92,7 @@
       const query = firestore.query(events, firestore.where('ownerUid', '==', user.uid));
       return firestore.onSnapshot(query, { includeMetadataChanges: true }, snapshot => {
         try {
-          owned = snapshot.docs.filter(document => !document.metadata.hasPendingWrites)
+          owned = snapshot.docs.filter(document => !document.metadata.hasPendingWrites && document.data().status !== 'deleted')
             .map(document => ({ event: readEvent(document) }));
           onChange();
         } catch (error) {
@@ -113,13 +113,27 @@
       return event.id;
     }
 
+    async function deleteEvent(id, uid) {
+      await firestore.runTransaction(db, async transaction => {
+        const ref = eventRef(id);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists() || snapshot.data().status === 'deleted') throw new Error('イベントが見つかりません。');
+        const event = readEvent(snapshot);
+        if (event.ownerUid !== uid) throw new Error('主催者として操作してください。');
+        transaction.set(ref, { id, ownerUid: uid, status: 'deleted', updatedAt: firestore.serverTimestamp() });
+      });
+      owned = owned.filter(item => item.event.id !== id);
+    }
+
     function changeEvent(id, change) {
       return firestore.runTransaction(db, async transaction => {
         const ref = eventRef(id);
         const snapshot = await transaction.get(ref);
-        if (!snapshot.exists()) throw new Error('イベントが見つかりません。');
-        const changes = await change(readEvent(snapshot), transaction);
+        if (!snapshot.exists() || snapshot.data().status === 'deleted') throw new Error('イベントが見つかりません。');
+        const event = readEvent(snapshot);
+        const changes = await change(event, transaction);
         transaction.update(ref, { ...changes, updatedAt: firestore.serverTimestamp() });
+        return { ...event, ...changes };
       });
     }
 
@@ -173,7 +187,7 @@
 
     return {
       identity: () => user.uid, id: model.id, listOwned: () => owned,
-      watchEvent, watchOwned, create, update, submit, finalize, reopen
+      watchEvent, watchOwned, create, update, submit, finalize, reopen, deleteEvent
     };
   }
 

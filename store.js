@@ -94,13 +94,14 @@
 
   function get(eventId) {
     if (eventId === sampleId) initializeSample(identity());
-    return read(`event.${eventId}`);
+    const record = read(`event.${eventId}`);
+    return record?.event.status === 'deleted' ? null : record;
   }
 
   function listOwned(uid) {
     return keysStartingWith('event.').filter(key => key !== `event.${sampleId}`)
       .map(key => read(key))
-      .filter(record => record?.event?.ownerUid === uid)
+      .filter(record => record?.event?.ownerUid === uid && record.event.status !== 'deleted')
       .sort((a, b) => (b.event.updatedAt ?? 0) - (a.event.updatedAt ?? 0) ||
         a.event.title.localeCompare(b.event.title, 'ja') || a.event.id.localeCompare(b.event.id));
   }
@@ -133,6 +134,15 @@
     return event.id;
   }
 
+  function deleteEvent(eventId, uid) {
+    if (eventId === sampleId) throw new Error('デモは削除できません。');
+    return withEvent(eventId, record => {
+      requireOwner(record.event, uid);
+      record.event = { id: eventId, ownerUid: uid, status: 'deleted' };
+      record.responses = [];
+    });
+  }
+
   function editEvent(event, uid, revision, changes, expectedMemo) {
     requireOwner(event, uid);
     if (changes.memo !== undefined) {
@@ -149,10 +159,11 @@
     }
     if (event.status === 'closed') throw new Error('確定を取り消してから候補を編集してください。');
     if (event.revision !== revision) throw new Error('別のタブで候補が変更されました。最新の候補を確認してください。');
-    if (event.locked && ((changes.title !== undefined && changes.title !== event.title) ||
-        (changes.minimum !== undefined && changes.minimum !== event.minimum) ||
-        (changes.minimumPeople !== undefined && changes.minimumPeople !== (event.minimumPeople ?? 1)))) {
-      throw new Error('回答受付が始まったため、イベント名と開催条件は編集できません。');
+    if (changes.title !== undefined && (typeof changes.title !== 'string' || !changes.title.trim() || changes.title.length > 60)) {
+      throw new Error('イベント名は1〜60文字で入力してください。');
+    }
+    if (changes.minimum !== undefined && (!Number.isInteger(changes.minimum) || changes.minimum < 1 || changes.minimum > Schedule.DAY)) {
+      throw new Error('最低開催時間は1〜1440分で入力してください。');
     }
     if (changes.minimumPeople !== undefined && (!Number.isInteger(changes.minimumPeople) ||
         changes.minimumPeople < 1 || changes.minimumPeople > Schedule.MAX_PEOPLE)) {
@@ -180,14 +191,20 @@
       const answer = draft.answers[slot.id];
       const error = Schedule.answerError(slot, answer);
       if (error) throw new Error(error);
-      const useOffsets = slot.end !== null && answer.mark !== 'no';
-      return [slot.id, { mark: answer.mark, from: useOffsets ? answer.from ?? 0 : 0, to: useOffsets ? answer.to ?? 0 : 0 }];
+      const attending = answer.mark !== 'no';
+      const saved = {
+        mark: answer.mark,
+        from: attending ? answer.from ?? 0 : 0,
+        to: attending && slot.end !== null ? answer.to ?? 0 : 0
+      };
+      if (attending && slot.end === null && answer.until != null) saved.until = answer.until;
+      return [slot.id, saved];
     }));
     return { uid, name, answers };
   }
 
   function update(eventId, uid, revision, changes, expectedMemo) {
-    return withEvent(eventId, ({ event }) => editEvent(event, uid, revision, changes, expectedMemo));
+    return withEvent(eventId, ({ event }) => editEvent(event, uid, revision, changes, expectedMemo)).then(record => record.event);
   }
 
   function submit(eventId, uid, revision, draft) {
@@ -208,6 +225,7 @@
       item.people.length === selected.people.length && item.people.every(person => selected.people.some(old => old.uid === person.uid)));
     if (!proposal) throw new Error('回答が更新されました。最新の提案を確認してください。');
     event.final = { slotId: proposal.slot.id, date: proposal.slot.date, start: proposal.start, end: proposal.end, count: proposal.people.length };
+    if (proposal.end === null) event.final.sourceStart = proposal.slot.start;
     event.status = 'closed';
     event.locked = true;
   }
@@ -241,13 +259,14 @@
   // The view never writes
   // directly to browser storage or publishes a draft response.
   globalThis.DemoStore = {
-    get, listOwned, create, update, submit, finalize, reopen, identity, id, sampleId, persistent,
+    get, listOwned, create, update, submit, finalize, reopen, deleteEvent, identity, id, sampleId, persistent,
     listPinned: uid => listReferences('pin', uid),
     isPinned: (uid, eventId) => read(`pin.${uid}.${eventId}`) !== null,
     pin: (uid, eventId, title) => rememberReference('pin', uid, eventId, title),
     unpin: (uid, eventId) => remove(`pin.${uid}.${eventId}`),
     listJoined: uid => listReferences('joined', uid),
     rememberJoined: (uid, eventId, title) => rememberReference('joined', uid, eventId, title),
+    forgetJoined: (uid, eventId) => remove(`joined.${uid}.${eventId}`),
     profiles(eventId) { return read('profiles.' + eventId) ?? []; },
     addProfile(eventId) {
       const uid = id();

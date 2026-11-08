@@ -12,29 +12,57 @@
   }
 
   function availability(slot, answer) {
-    if (slot.end === null || !answer || answer.mark === 'no') return null;
-    return [slot.start + (answer.from ?? 0), slot.end + (answer.to ?? 0)];
+    if (!answer || answer.mark === 'no') return null;
+    const end = slot.end === null ? answer.until ?? null : slot.end + (answer.to ?? 0);
+    return [slot.start + (answer.from ?? 0), end];
   }
 
   function answerError(slot, answer) {
     if (!MARKS.includes(answer?.mark)) return '○・△・×から選んでください。';
-    if (slot.end === null || answer.mark === 'no') return '';
-    const offsets = [answer.from ?? 0, answer.to ?? 0];
+    if (answer.mark === 'no') return '';
+    const offsets = [answer.from ?? 0, slot.end === null ? 0 : answer.to ?? 0];
     if (offsets.some(value => !Number.isInteger(value) || value % 10 !== 0 || Math.abs(value) > 120)) {
       return '時間の調整は前後120分以内、10分刻みで指定してください。';
     }
-    if (answer.mark === 'yes' && (offsets[0] > 0 || offsets[1] < 0)) return '○では元の枠より早い開始・遅い終了を指定できます。';
+    if (answer.mark === 'yes' && (offsets[0] > 0 || offsets[1] < 0)) {
+      return slot.end === null ? '○では元の枠より早い開始を指定できます。' : '○では元の枠より早い開始・遅い終了を指定できます。';
+    }
     const [start, end] = availability(slot, answer);
+    if (slot.end === null) {
+      if (end === null) return '';
+      if (!Number.isInteger(end) || end < 0 || end >= 2 * DAY) return '参加できる上限時刻を当日または翌日で指定してください。';
+      return start >= end ? '参加できる上限時刻は、開始時刻より後にしてください。' : '';
+    }
     return start >= end ? '開始を終了より前にしてください。' : '';
   }
 
   function compareProposals(a, b) {
     return b.people.length - a.people.length || a.shift - b.shift ||
-      a.slot.date.localeCompare(b.slot.date) || a.start - b.start || a.end - b.end || a.slot.id.localeCompare(b.slot.id);
+      a.slot.date.localeCompare(b.slot.date) || a.start - b.start || (a.end ?? 2 * DAY) - (b.end ?? 2 * DAY) || a.slot.id.localeCompare(b.slot.id);
+  }
+
+  function bestForOpenSlot(slot, responses) {
+    const people = responses.flatMap(response => {
+      const interval = availability(slot, response.answers[slot.id]);
+      return interval ? [{ uid: response.uid, name: response.name, start: interval[0], end: interval[1] }] : [];
+    });
+    const starts = new Set([slot.start]);
+    for (const person of people) {
+      starts.add(person.start);
+      if (person.end !== null) starts.add(person.end - 1);
+    }
+    let best = null;
+    for (const start of starts) {
+      const attending = people.filter(person => person.start <= start && (person.end === null || start < person.end));
+      if (!attending.length) continue;
+      const proposal = { slot, start, end: null, people: attending, shift: Math.abs(start - slot.start) };
+      if (!best || compareProposals(proposal, best) < 0) best = proposal;
+    }
+    return best;
   }
 
   function bestForSlot(slot, responses, minimum) {
-    if (slot.end === null) return null;
+    if (slot.end === null) return bestForOpenSlot(slot, responses);
     const intervals = responses.flatMap(response => {
       const interval = availability(slot, response.answers[slot.id]);
       return interval && interval[1] - interval[0] >= minimum
