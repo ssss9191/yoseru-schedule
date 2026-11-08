@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="○△×と参加可能な時間で日程を調整する、授業課題のプロトタイプ。">
-  <meta name="theme-color" content="#f4f6fb">
+  <meta name="theme-color" content="#f3f3f3">
   <title>よせる | 日程調整</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233842ca'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
   <script defer src="./schedule.js"></script>
   <script defer src="./store.js"></script>
@@ -41,16 +41,15 @@
   <template id="home-template">
     <header class="event-header home-header">
       <div>
-        <p class="eyebrow">よせる · ホーム</p>
         <h1 id="view-title" tabindex="-1">イベント一覧</h1>
         <p>イベントを作成したり、保存した日程調整を開き直したりできます。</p>
       </div>
-      <button type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
     </header>
     <section aria-labelledby="home-list-title">
       <div class="home-list-heading">
         <h2 id="home-list-title">自分が作ったイベント</h2>
         <span class="pill" id="home-count"></span>
+        <button type="button" class="button primary" data-action="new-event">＋ 新しいイベント</button>
       </div>
       <ul id="home-events" class="home-events"></ul>
       <div id="home-empty" class="empty" hidden>
@@ -76,7 +75,6 @@
 
   <template id="event-template">
     <div class="event-copy">
-      <p class="eyebrow">予定を、みんなに少しずつ寄せる</p>
       <h1 id="event-title"></h1>
       <div class="meta">
         <span id="event-state" class="state"></span>
@@ -104,9 +102,9 @@
   </template>
 
   <template id="navigation-template">
-    <button type="button" data-action="view" data-key="organizer"><span aria-hidden="true">▦</span>主催者</button>
-    <button type="button" data-action="view" data-key="answer"><span aria-hidden="true">✎</span>自分の回答</button>
-    <button type="button" data-action="view" data-key="results"><span aria-hidden="true">▤</span>結果・回答一覧</button>
+    <button type="button" data-action="view" data-key="organizer">主催者</button>
+    <button type="button" data-action="view" data-key="answer">自分の回答</button>
+    <button type="button" data-action="view" data-key="results">結果・回答一覧</button>
   </template>
 
   <!-- 主催者画面 -->
