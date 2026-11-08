@@ -218,6 +218,7 @@ input[type=checkbox] { width: 17px; height: 17px; }
 .proposal-table, .table-scroll table { width: 100%; border-spacing: 0; font-size: .84rem; }
 .proposal-table th, .proposal-table td, .table-scroll th, .table-scroll td { padding: 8px 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .proposal-table thead th, .table-scroll thead th { background: var(--shade); color: var(--muted); font-size: .79rem; }
+.proposal-table thead th:not(:nth-child(2)) { white-space: nowrap; }
 .proposal-table .proposal-copy, .proposal-table thead th:nth-child(2) { text-align: start; }
 .proposal-table .rank, .proposal-count, .proposal-action { text-align: center; white-space: nowrap; }
 .proposal.best { background: var(--shade); }
