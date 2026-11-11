@@ -4,6 +4,8 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const localUid = DemoStore.identity();
 const sampleId = DemoStore.sampleId;
+const demoEnabled = !globalThis.YOSERU_FIREBASE_CONFIG &&
+  ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const weekdays = [...'日月火水木金土'];
 const marks = { yes: ['○', '参加できる'], maybe: ['△', '時間しだい'], no: ['×', '参加できない'] };
 const dayMs = 86400000;
@@ -73,7 +75,8 @@ function shareURL(id = eventId) {
 function eventFromURL() {
   const params = location.protocol === 'file:' ? location.hash.slice(1) : location.search;
   const id = new URLSearchParams(params).get('event');
-  return id && /^(demo|[a-f0-9]{24})$/.test(id) ? id : null;
+  if (id === sampleId) return demoEnabled ? id : null;
+  return id && /^[a-f0-9]{24}$/.test(id) ? id : null;
 }
 
 function resetOrganizer() {
@@ -155,7 +158,7 @@ function openEvent(id, initialView, replace = false) {
 
   function firstRender(next) {
     record = next;
-    simulated = store === DemoStore && record ? DemoStore.profiles(id) : [];
+    simulated = demoEnabled && record ? DemoStore.profiles(id) : [];
     if (record) resetOrganizer();
     else forgetEvent();
     rememberPersonalEvent();
@@ -385,8 +388,8 @@ function render() {
   if (!record) {
     header.innerHTML = '<div><h1>イベントが見つかりません</h1></div>';
     nav.replaceChildren();
-    const hint = shared ? 'イベントを作った人から、共有モードのリンクを受け取ってください。' :
-      'ローカルデモで作ったイベントは、作成したブラウザで開けます。';
+    const hint = shared ? 'イベントを作った人から、共有リンクを受け取ってください。' :
+      'リンクを確認してください。このブラウザーに保存したイベントはイベント一覧から開けます。';
     view.innerHTML = '<div class="panel">' + empty('イベントを開けません', hint) + '</div>';
     view.removeAttribute('aria-labelledby');
     return;
@@ -406,13 +409,15 @@ function render() {
   updatePinButton($('[data-action=pin-event]', content));
   renderEventMemo(content);
 
-  const options = [[baseUid, event().ownerUid === baseUid ? '主催者（自分）' : '自分']]
-    .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
-    .concat(eventId === sampleId ? [['demo-a', '青木（例）'], ['demo-b', '佐藤（例）'], ['demo-c', '田中（例）']] : []);
   const profiles = $('#profile', content);
-  profiles.closest('.profile').hidden = shared;
-  profiles.prepend(...options.map(([id, label]) => new Option(label, id)));
-  profiles.value = uid;
+  if (demoEnabled) {
+    const options = [[baseUid, event().ownerUid === baseUid ? '主催者（自分）' : '自分']]
+      .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
+      .concat(eventId === sampleId ? [['demo-a', '青木（例）'], ['demo-b', '佐藤（例）'], ['demo-c', '田中（例）']] : []);
+    profiles.prepend(...options.map(([id, label]) => new Option(label, id)));
+    profiles.value = uid;
+    profiles.closest('.profile').hidden = false;
+  } else profiles.closest('.profile').remove();
   if (closed) {
     $('.final-banner', content).hidden = false;
     const final = event().final;
@@ -987,7 +992,7 @@ function showShare(saved = false) {
   let message = '参加者に送ると、このリンクから回答・結果の確認ができます。';
   if (event().status === 'closed') message = '参加者に送ると、確定した日程と結果を確認できます。';
   else if (!event().slots.length) message = '候補日時を追加すると、参加者がこのリンクから回答できます。';
-  if (store !== cloud) message = 'ローカルデモのリンクです。イベントは作成したブラウザーで確認できます。';
+  if (store !== cloud) message = 'このイベントは作成したブラウザーでのみ開けます。';
   $('#share-message', content).textContent = message;
   dialog.replaceChildren(content);
   dialog.showModal();
@@ -1354,7 +1359,7 @@ view.addEventListener('input', evt => {
 
 document.addEventListener('change', evt => {
   const field = evt.target;
-  if (field.id === 'profile') {
+  if (demoEnabled && field.id === 'profile') {
     const value = field.value;
     const changeProfile = () => {
       if (value === 'new') {
@@ -1445,7 +1450,7 @@ async function start() {
   if (globalThis.YOSERU_FIREBASE_CONFIG) {
     const controls = [$('#go-home'), $('#new-event')];
     controls.forEach(control => { control.disabled = true; });
-    renderLoading('共有モードに接続中…');
+    renderLoading('接続中…');
     try {
       cloud = await FirebaseStore.connect(globalThis.YOSERU_FIREBASE_CONFIG);
     } catch {
@@ -1456,7 +1461,7 @@ async function start() {
   }
   window.addEventListener('popstate', restoreRoute);
   restoreRoute();
-  if (failed) toast('Firebaseに接続できませんでした。ローカルデモを表示しています。');
+  if (failed) toast('共有機能に接続できませんでした。このブラウザーに保存したイベントは開けます。');
   else if (!DemoStore.persistent) toast('ブラウザの保存機能が無効です。このタブを閉じるまで操作できます。');
 }
 

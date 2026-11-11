@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="○△×と参加可能な時間で日程を調整する、授業課題のプロトタイプ。">
+  <meta name="description" content="○△×と参加可能な時間で日程を調整できるアプリです。">
   <meta name="theme-color" content="#f5f5f6">
   <title>よせあい | 日程調整</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -12,7 +12,7 @@
   <script defer src="./store.js?v=organizer-draft"></script>
   <script defer src="./firebase-config.js"></script>
   <script defer src="./firebase-store.js?v=list-delete"></script>
-  <script defer src="./app.js?v=answer-progress"></script>
+  <script defer src="./app.js?v=submission"></script>
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
@@ -112,10 +112,9 @@
           <section class="guide-note" aria-labelledby="guide-reopen">
             <h2 id="guide-reopen">イベントを開き直す</h2>
             <p>「イベント一覧」から作成・回答したイベントを開けます。よく使うイベントは「☆ ピン留め」でメニューに追加できます。</p>
-            <p class="hint">共有モードでは同じリンクを参加者に送れます。ローカルデモのイベントは作成したブラウザーで確認できます。</p>
           </section>
         </section>
-        <noscript>このプロトタイプを操作するにはJavaScriptを有効にしてください。</noscript>
+        <noscript>よせあいを使うにはJavaScriptを有効にしてください。</noscript>
       </main>
     </div>
   </div>
@@ -213,7 +212,7 @@
       <button type="button" class="button secondary small pin-event" data-action="pin-event" aria-pressed="false"><span aria-hidden="true">☆</span> ピン留め</button>
       <button type="button" class="button secondary small" data-action="share">共有リンクを表示</button>
       <button type="button" class="button secondary small" data-action="reopen" hidden>確定を取り消す</button>
-      <label class="profile">
+      <label class="profile" hidden>
         デモ操作
         <select id="profile" aria-label="デモ操作のプロフィール">
           <option value="new">＋ 別の参加者を試す</option>
