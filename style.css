@@ -123,8 +123,6 @@ h3 { font-size: 1.04rem; }
 .pin-event[aria-pressed=true] { background: var(--soft); }
 .event-overview { flex: 1 0 100%; min-width: 0; padding: 8px 11px; border: 1px solid var(--line); border-radius: 4px; background: var(--shade); font-size: .86rem; }
 .event-overview p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.profile { color: var(--muted); font-size: .72rem; font-weight: 650; }
-.profile select { display: block; max-width: 170px; min-height: 36px; border: 1px solid var(--control-line); background: var(--paper); color: var(--ink); border-radius: 4px; padding: 4px 6px; }
 .final-banner { flex: 1 0 100%; min-width: 0; background: var(--primary); color: #fff; border: 1px solid var(--primary); border-radius: 5px; padding: 14px 16px; }
 #final-heading { font-size: .95rem; }
 #final-heading:focus-visible { outline-color: #fff; }
@@ -139,11 +137,17 @@ h1[tabindex]:focus, h2[tabindex]:focus { outline: none; }
 /* 主催者の候補一覧と日時入力 */
 .event-settings { border-block: 1px solid var(--line); margin-bottom: 14px; }
 .event-settings h3 { padding: 10px 8px; font-size: .89rem; background: var(--shade); }
-.settings-fields { display: grid; grid-template-columns: minmax(130px, 1fr) repeat(2, minmax(115px, 135px)); gap: 10px; padding: 10px 8px; }
+.settings-fields { display: grid; grid-template-columns: minmax(190px, 1fr) repeat(2, minmax(125px, 150px)); gap: 10px; padding: 10px 8px; }
 .settings-fields label, .answer-name label, dialog label { font-size: .82rem; color: var(--muted); font-weight: 700; }
 input:not([type=checkbox], [type=range]) { display: block; background: var(--paper); border: 1px solid var(--control-line); border-radius: 4px; min-height: 40px; padding: 6px 9px; width: 100%; color: var(--ink); }
-.settings-fields input, .answer-name input, dialog input { margin-top: 4px; }
-.unit-input { display: flex; align-items: center; gap: 6px; }
+.answer-name input, dialog input { margin-top: 4px; }
+.setting-control { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+.setting-control > input, .unit-input { flex: 1; min-width: 0; }
+.setting-control > input { margin-top: 0; }
+.setting-control select { min-height: 40px; padding: 4px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--paper); color: var(--ink); font-size: .8rem; }
+.setting-control .button { min-height: 40px; white-space: nowrap; }
+.unit-input { display: flex; align-items: center; gap: 3px; }
+.unit-input input { min-width: 0; padding-inline: 5px; }
 .organizer-workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, 1fr); grid-template-areas: "registered editor"; gap: 22px; align-items: start; }
 .organizer-workspace:has(.organizer-grid[hidden]) { grid-template-columns: 1fr; grid-template-areas: "registered"; }
 .candidate-list { grid-area: registered; }
@@ -288,6 +292,12 @@ dialog::backdrop { background: #0006; }
 dialog p { color: var(--muted); margin: 6px 0 10px; font-size: .89rem; }
 dialog .confirm-time { padding: 9px 10px; background: var(--shade); color: var(--ink); font-size: 1.1rem; font-weight: 700; }
 dialog .actions { justify-content: end; }
+#save-event-name-form { margin-top: 12px; }
+dialog .error { color: var(--red); }
+.saved-event-names { list-style: none; padding: 0; margin: 12px 0; max-height: min(45vh, 340px); overflow-y: auto; }
+.saved-event-names li { display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+.saved-event-names [data-action=use-event-name] { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.saved-event-names [data-action=remove-event-name] { flex: none; }
 .change-list { max-height: min(48vh, 360px); overflow: auto; padding-inline-start: 1.3rem; margin-block: 10px; }
 .change-list li { padding-block: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .help-steps { list-style: none; margin: 0; padding: 0; }

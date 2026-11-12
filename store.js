@@ -2,7 +2,6 @@
   'use strict';
 
   const prefix = 'yoseru.v1.';
-  const sampleId = 'demo';
   const cache = new Map();
   const listeners = new Set();
   let persistent = true;
@@ -42,6 +41,10 @@
     return keysStartingWith(start).map(key => ({ id: key.slice(start.length), title: read(key) }));
   }
 
+  function listEventReferences(kind, uid) {
+    return listReferences(kind, uid).filter(reference => isEventId(reference.id));
+  }
+
   function rememberReference(kind, uid, eventId, title) {
     const key = `${kind}.${uid}.${eventId}`;
     if (read(key) !== title) write(key, title);
@@ -49,6 +52,10 @@
 
   function id() {
     return [...crypto.getRandomValues(new Uint8Array(12))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function isEventId(value) {
+    return typeof value === 'string' && /^[a-f0-9]{24}$/.test(value);
   }
 
   function identity() {
@@ -60,15 +67,6 @@
     return uid;
   }
 
-  function sampleSlots() {
-    return [
-      { id: id(), date: '2026-11-16', start: 1080, end: 1200 },
-      { id: id(), date: '2026-11-16', start: 1230, end: 1320 },
-      { id: id(), date: '2026-11-18', start: 1140, end: 1260 },
-      { id: id(), date: '2026-11-20', start: 1080, end: null }
-    ];
-  }
-
   function makeEvent(eventId, ownerUid, title, slots) {
     return {
       id: eventId, ownerUid, title, slots, minimum: 60, minimumPeople: 1, status: 'open',
@@ -76,32 +74,15 @@
     };
   }
 
-  function initializeSample(uid) {
-    if (read(`event.${sampleId}`)) return;
-    const slots = sampleSlots();
-    const event = makeEvent(sampleId, uid, 'ゼミ発表の打ち合わせ', slots);
-    event.locked = true;
-    const yes = (from = 0, to = 0) => ({ mark: 'yes', from, to });
-    const maybe = (from = 0, to = 0) => ({ mark: 'maybe', from, to });
-    const no = { mark: 'no', from: 0, to: 0 };
-    const responses = [
-      ['demo-a', '青木', [yes(), no, no, yes()]],
-      ['demo-b', '佐藤', [maybe(30, -30), yes(), yes(), maybe()]],
-      ['demo-c', '田中', [yes(-30, 30), no, yes(), no]]
-    ].map(([uid, name, answers]) => ({ uid, name, answers: Object.fromEntries(slots.map((slot, index) => [slot.id, answers[index]])) }));
-    write(`event.${sampleId}`, { event, responses });
-  }
-
   function get(eventId) {
-    if (eventId === sampleId) initializeSample(identity());
+    if (!isEventId(eventId)) return null;
     const record = read(`event.${eventId}`);
     return record?.event.status === 'deleted' ? null : record;
   }
 
   function listOwned(uid) {
-    return keysStartingWith('event.').filter(key => key !== `event.${sampleId}`)
-      .map(key => read(key))
-      .filter(record => record?.event?.ownerUid === uid && record.event.status !== 'deleted')
+    return keysStartingWith('event.').map(key => get(key.slice('event.'.length)))
+      .filter(record => record?.event?.ownerUid === uid)
       .sort((a, b) => (b.event.updatedAt ?? 0) - (a.event.updatedAt ?? 0) ||
         a.event.title.localeCompare(b.event.title, 'ja') || a.event.id.localeCompare(b.event.id));
   }
@@ -135,7 +116,6 @@
   }
 
   function deleteEvent(eventId, uid) {
-    if (eventId === sampleId) throw new Error('デモは削除できません。');
     return withEvent(eventId, record => {
       requireOwner(record.event, uid);
       record.event = { id: eventId, ownerUid: uid, status: 'deleted' };
@@ -254,25 +234,20 @@
     if (event.key?.startsWith(eventPrefix)) notify(event.key.slice(eventPrefix.length));
   });
 
-  globalThis.EventModel = { id, makeEvent, editEvent, makeResponse, setFinal, clearFinal };
+  globalThis.EventModel = { id, isEventId, makeEvent, editEvent, makeResponse, setFinal, clearFinal };
 
-  // The view never writes
-  // directly to browser storage or publishes a draft response.
-  globalThis.DemoStore = {
-    get, listOwned, create, update, submit, finalize, reopen, deleteEvent, identity, id, sampleId, persistent,
-    listPinned: uid => listReferences('pin', uid),
+  globalThis.LocalStore = {
+    get, listOwned, create, update, submit, finalize, reopen, deleteEvent, identity, id, persistent,
+    listPinned: uid => listEventReferences('pin', uid),
     isPinned: (uid, eventId) => read(`pin.${uid}.${eventId}`) !== null,
     pin: (uid, eventId, title) => rememberReference('pin', uid, eventId, title),
     unpin: (uid, eventId) => remove(`pin.${uid}.${eventId}`),
-    listJoined: uid => listReferences('joined', uid),
+    listEventNames: uid => listReferences('saved-name', uid).map(reference => reference.title),
+    rememberEventName: (uid, title) => rememberReference('saved-name', uid, title, title),
+    forgetEventName: (uid, title) => remove(`saved-name.${uid}.${title}`),
+    listJoined: uid => listEventReferences('joined', uid),
     rememberJoined: (uid, eventId, title) => rememberReference('joined', uid, eventId, title),
     forgetJoined: (uid, eventId) => remove(`joined.${uid}.${eventId}`),
-    profiles(eventId) { return read('profiles.' + eventId) ?? []; },
-    addProfile(eventId) {
-      const uid = id();
-      write('profiles.' + eventId, [...this.profiles(eventId), uid]);
-      return uid;
-    },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
   };
 })();

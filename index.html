@@ -7,12 +7,12 @@
   <meta name="theme-color" content="#f5f5f6">
   <title>よせあい | 日程調整</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23222222'/%3E%3Cpath d='M7 23 16 8l9 15Z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css?v=answer-progress">
+  <link rel="stylesheet" href="./style.css?v=source-cleanup">
   <script defer src="./schedule.js?v=answer-progress"></script>
-  <script defer src="./store.js?v=organizer-draft"></script>
+  <script defer src="./store.js?v=source-cleanup"></script>
   <script defer src="./firebase-config.js"></script>
   <script defer src="./firebase-store.js?v=list-delete"></script>
-  <script defer src="./app.js?v=submission"></script>
+  <script defer src="./app.js?v=source-cleanup"></script>
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
@@ -122,6 +122,28 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- 画面を編集する場所。JavaScriptが各テンプレートを表示し、idやdata属性で値を入れます。 -->
+  <template id="event-names-template">
+    <h2 id="dialog-title" tabindex="-1" autofocus>よく使うイベント名</h2>
+    <form id="save-event-name-form">
+      <label for="saved-event-name-input">追加する名前</label>
+      <div class="setting-control">
+        <input id="saved-event-name-input" maxlength="60" placeholder="例：ゼミ打ち合わせ">
+        <button type="submit" class="button primary small">追加</button>
+      </div>
+      <p id="saved-event-name-error" class="error" role="alert" hidden></p>
+    </form>
+    <p id="saved-event-names-empty">登録した名前はまだありません。</p>
+    <ul id="saved-event-names" class="saved-event-names"></ul>
+    <div class="actions"><button type="button" class="button secondary" data-action="close-dialog">閉じる</button></div>
+  </template>
+
+  <template id="saved-event-name-template">
+    <li>
+      <button type="button" class="button secondary small" data-action="use-event-name"></button>
+      <button type="button" class="button text small" data-action="remove-event-name">削除</button>
+    </li>
+  </template>
+
   <template id="share-template">
     <h2 id="dialog-title">このリンクを共有しよう</h2>
     <p id="share-saved" hidden>設定を保存しました。</p>
@@ -212,12 +234,6 @@
       <button type="button" class="button secondary small pin-event" data-action="pin-event" aria-pressed="false"><span aria-hidden="true">☆</span> ピン留め</button>
       <button type="button" class="button secondary small" data-action="share">共有リンクを表示</button>
       <button type="button" class="button secondary small" data-action="reopen" hidden>確定を取り消す</button>
-      <label class="profile" hidden>
-        デモ操作
-        <select id="profile" aria-label="デモ操作のプロフィール">
-          <option value="new">＋ 別の参加者を試す</option>
-        </select>
-      </label>
     </div>
     <section class="final-banner" aria-labelledby="final-heading" hidden>
       <h2 id="final-heading" tabindex="-1">日程が確定しました</h2>
@@ -248,25 +264,57 @@
       <h3 id="event-settings-title">イベント設定</h3>
       <div class="settings-fields">
         <div>
-          <label>イベント名<input id="event-name" maxlength="60"></label>
+          <label for="event-name">イベント名</label>
+          <div class="setting-control">
+            <input id="event-name" maxlength="60">
+            <button type="button" class="button secondary small" data-action="event-names" aria-haspopup="dialog">よく使う名前</button>
+          </div>
           <p id="event-name-error" class="error" hidden></p>
         </div>
         <div>
-          <label>
-            最低開催時間
-            <span class="unit-input">
+          <label for="minimum">最低開催時間</label>
+          <div class="setting-control">
+            <div class="unit-input">
               <input id="minimum" inputmode="numeric" maxlength="4" aria-label="最低開催時間（分）"><span>分</span>
-            </span>
-          </label>
+            </div>
+            <select data-fill-setting="minimum" aria-label="最低開催時間を選ぶ">
+              <option value="">選ぶ</option>
+              <option value="15">15分</option>
+              <option value="30">30分</option>
+              <option value="45">45分</option>
+              <option value="60">60分</option>
+              <option value="90">90分</option>
+              <option value="120">120分</option>
+              <option value="180">180分</option>
+              <option value="240">240分</option>
+            </select>
+          </div>
           <p id="minimum-error" class="error" hidden></p>
         </div>
         <div>
-          <label>
-            最低参加人数
-            <span class="unit-input">
+          <label for="minimum-people">最低参加人数</label>
+          <div class="setting-control">
+            <div class="unit-input">
               <input id="minimum-people" inputmode="numeric" maxlength="4" aria-label="最低参加人数（人）"><span>人</span>
-            </span>
-          </label>
+            </div>
+            <select data-fill-setting="minimum-people" aria-label="最低参加人数を選ぶ">
+              <option value="">選ぶ</option>
+              <option value="1">1人</option>
+              <option value="2">2人</option>
+              <option value="3">3人</option>
+              <option value="4">4人</option>
+              <option value="5">5人</option>
+              <option value="6">6人</option>
+              <option value="7">7人</option>
+              <option value="8">8人</option>
+              <option value="9">9人</option>
+              <option value="10">10人</option>
+              <option value="15">15人</option>
+              <option value="20">20人</option>
+              <option value="30">30人</option>
+              <option value="50">50人</option>
+            </select>
+          </div>
           <p id="minimum-people-error" class="error" hidden></p>
         </div>
       </div>
@@ -334,7 +382,7 @@
       <textarea id="organizer-memo" aria-labelledby="memo-title" aria-describedby="memo-help" maxlength="500" rows="3" placeholder="準備するものや確認事項など"></textarea>
     </section>
     <div class="organizer-footer">
-      <button type="button" class="button danger small" data-action="delete-event" hidden>イベントを削除</button>
+      <button type="button" class="button danger small" data-action="delete-event">イベントを削除</button>
       <p id="settings-save-help" class="hint" role="status">候補日時・イベント設定・メモをまとめて保存します。</p>
       <button type="button" class="button primary" data-action="settings">変更を保存</button>
     </div>

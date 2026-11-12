@@ -2,10 +2,7 @@
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const localUid = DemoStore.identity();
-const sampleId = DemoStore.sampleId;
-const demoEnabled = !globalThis.YOSERU_FIREBASE_CONFIG &&
-  ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const localUid = LocalStore.identity();
 const weekdays = [...'日月火水木金土'];
 const marks = { yes: ['○', '参加できる'], maybe: ['△', '時間しだい'], no: ['×', '参加できない'] };
 const dayMs = 86400000;
@@ -16,13 +13,11 @@ const drafts = new Map();
 let eventId;
 let record;
 let cloud;
-let store = DemoStore;
-let baseUid = localUid;
-let uid = baseUid;
+let store = LocalStore;
+let uid = localUid;
 let stopWatching = () => {};
 let screen;
 let org;
-let simulated = [];
 let busy = false;
 let focusFinalEventId;
 let toastTimer;
@@ -75,8 +70,7 @@ function shareURL(id = eventId) {
 function eventFromURL() {
   const params = location.protocol === 'file:' ? location.hash.slice(1) : location.search;
   const id = new URLSearchParams(params).get('event');
-  if (id === sampleId) return demoEnabled ? id : null;
-  return id && /^[a-f0-9]{24}$/.test(id) ? id : null;
+  return EventModel.isEventId(id) ? id : null;
 }
 
 function resetOrganizer() {
@@ -146,11 +140,10 @@ function openEvent(id, initialView, replace = false) {
   setGuide(false);
   stopWatching();
   stopWatching = () => {};
-  const local = DemoStore.get(id);
-  store = local || !cloud ? DemoStore : cloud;
+  const local = LocalStore.get(id);
+  store = local || !cloud ? LocalStore : cloud;
   eventId = id;
-  baseUid = store.identity();
-  uid = baseUid;
+  uid = store.identity();
   screen = initialView;
   const state = { eventId, screen };
   if (replace) history.replaceState(state, '', shareURL());
@@ -158,7 +151,6 @@ function openEvent(id, initialView, replace = false) {
 
   function firstRender(next) {
     record = next;
-    simulated = demoEnabled && record ? DemoStore.profiles(id) : [];
     if (record) resetOrganizer();
     else forgetEvent();
     rememberPersonalEvent();
@@ -168,7 +160,7 @@ function openEvent(id, initialView, replace = false) {
     if (!replace) $('#view-title')?.focus();
   }
 
-  if (store === DemoStore) {
+  if (store === LocalStore) {
     firstRender(local);
   } else {
     record = null;
@@ -202,11 +194,11 @@ function openHome(replace = false) {
   if (!replace) $('#view-title').focus();
 }
 
-function setScreen(next, focus = true) {
+function setScreen(next) {
   screen = next;
   history.replaceState({ eventId, screen }, '', shareURL());
   render();
-  if (focus) $('#view-title')?.focus();
+  $('#view-title')?.focus();
 }
 
 function template(name) {
@@ -270,18 +262,18 @@ function rememberPersonalEvent(submitted = false) {
   if (!record) return;
   const { id, title, ownerUid } = event();
   try {
-    if (DemoStore.isPinned(baseUid, id)) DemoStore.pin(baseUid, id, title);
-    if (id !== sampleId && ownerUid !== baseUid && (submitted || record.responses.some(response => response.uid === baseUid))) {
-      DemoStore.rememberJoined(baseUid, id, title);
+    if (LocalStore.isPinned(uid, id)) LocalStore.pin(uid, id, title);
+    if (ownerUid !== uid && (submitted || record.responses.some(response => response.uid === uid))) {
+      LocalStore.rememberJoined(uid, id, title);
     }
   } catch {
     toast('このブラウザーのイベント一覧を更新できませんでした。');
   }
 }
 
-function forgetEvent(id = eventId, identity = baseUid) {
-  DemoStore.unpin(identity, id);
-  DemoStore.forgetJoined(identity, id);
+function forgetEvent(id = eventId, identity = uid) {
+  LocalStore.unpin(identity, id);
+  LocalStore.forgetJoined(identity, id);
 }
 
 function renderEventMemo(root) {
@@ -291,7 +283,7 @@ function renderEventMemo(root) {
 }
 
 function updatePinButton(button) {
-  const pinned = DemoStore.isPinned(baseUid, eventId);
+  const pinned = LocalStore.isPinned(uid, eventId);
   button.setAttribute('aria-pressed', pinned);
   button.querySelector('span').textContent = pinned ? '★' : '☆';
 }
@@ -299,7 +291,7 @@ function updatePinButton(button) {
 function renderPins() {
   const items = [];
   for (const identity of personalIdentities()) {
-    for (const { id, title } of DemoStore.listPinned(identity)) {
+    for (const { id, title } of LocalStore.listPinned(identity)) {
       const item = template('pin');
       const open = $('.pinned-open', item);
       open.dataset.eventId = id;
@@ -318,7 +310,7 @@ function renderPins() {
 
 function renderHome() {
   const content = template('home');
-  const events = [...(cloud?.listOwned() ?? []), ...DemoStore.listOwned(localUid)];
+  const events = [...(cloud?.listOwned() ?? []), ...LocalStore.listOwned(localUid)];
   const updated = event => event.updatedAt?.toMillis?.() ?? event.updatedAt ?? 0;
   events.sort((a, b) => updated(b.event) - updated(a.event));
   $('#home-count', content).textContent = events.length + '件';
@@ -353,7 +345,7 @@ function renderHome() {
   const ownedIds = new Set(events.map(({ event }) => event.id));
   const joined = new Map();
   for (const identity of personalIdentities()) {
-    for (const { id, title } of DemoStore.listJoined(identity)) {
+    for (const { id, title } of LocalStore.listJoined(identity)) {
       if (!ownedIds.has(id)) joined.set(id, title);
     }
   }
@@ -375,7 +367,6 @@ function render() {
   const nav = $('#views');
   const home = screen === 'home';
   renderPins();
-  const shared = Boolean(cloud && (home || store === cloud));
   updateNavigation();
   header.hidden = home;
   nav.hidden = home;
@@ -388,7 +379,7 @@ function render() {
   if (!record) {
     header.innerHTML = '<div><h1>イベントが見つかりません</h1></div>';
     nav.replaceChildren();
-    const hint = shared ? 'イベントを作った人から、共有リンクを受け取ってください。' :
+    const hint = store === cloud ? 'イベントを作った人から、共有リンクを受け取ってください。' :
       'リンクを確認してください。このブラウザーに保存したイベントはイベント一覧から開けます。';
     view.innerHTML = '<div class="panel">' + empty('イベントを開けません', hint) + '</div>';
     view.removeAttribute('aria-labelledby');
@@ -409,15 +400,6 @@ function render() {
   updatePinButton($('[data-action=pin-event]', content));
   renderEventMemo(content);
 
-  const profiles = $('#profile', content);
-  if (demoEnabled) {
-    const options = [[baseUid, event().ownerUid === baseUid ? '主催者（自分）' : '自分']]
-      .concat(simulated.map((id, i) => [id, '参加者 ' + (i + 1)]))
-      .concat(eventId === sampleId ? [['demo-a', '青木（例）'], ['demo-b', '佐藤（例）'], ['demo-c', '田中（例）']] : []);
-    profiles.prepend(...options.map(([id, label]) => new Option(label, id)));
-    profiles.value = uid;
-    profiles.closest('.profile').hidden = false;
-  } else profiles.closest('.profile').remove();
   if (closed) {
     $('.final-banner', content).hidden = false;
     const final = event().final;
@@ -497,7 +479,6 @@ function renderOrganizer() {
   const settings = $('.event-settings', content);
   settings.hidden = closed;
   $('#organizer-memo', content).value = org.memo;
-  $('[data-action=delete-event]', content).hidden = eventId === sampleId;
   updateOrganizerSaveStatus(content);
   $('.organizer-grid', content).hidden = closed;
   $('#calendar-section', content).hidden = editing;
@@ -820,6 +801,52 @@ function ask(title, content, action, button, cancel = '閉じる') {
   dialog.showModal();
 }
 
+function renderSavedEventNames() {
+  const names = LocalStore.listEventNames(localUid).sort((a, b) => a.localeCompare(b, 'ja'));
+  $('#saved-event-names-empty', dialog).hidden = names.length > 0;
+  const items = names.map(name => {
+    const item = template('saved-event-name');
+    const use = $('[data-action=use-event-name]', item);
+    const remove = $('[data-action=remove-event-name]', item);
+    use.textContent = name;
+    remove.dataset.title = name;
+    remove.setAttribute('aria-label', '「' + name + '」の登録を削除');
+    return item;
+  });
+  $('#saved-event-names', dialog).replaceChildren(...items);
+}
+
+function addSavedEventName(evt) {
+  evt.preventDefault();
+  const form = evt.currentTarget;
+  const input = $('#saved-event-name-input', form);
+  const error = $('#saved-event-name-error', form);
+  const name = input.value.trim();
+  let message = '';
+  if (!name) message = '追加する名前を入力してください。';
+  else if (LocalStore.listEventNames(localUid).includes(name)) message = 'この名前はすでに登録されています。';
+  if (message) {
+    showInputError([input], error, message);
+    input.focus();
+    return;
+  }
+  try {
+    LocalStore.rememberEventName(localUid, name);
+  } catch {
+    showInputError([input], error, 'このブラウザーに名前を保存できませんでした。');
+    return;
+  }
+  input.value = '';
+  showInputError([input], error, '');
+  renderSavedEventNames();
+  input.focus();
+}
+
+function applyInputValue(input, value) {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function changeMonth(by) {
   org.month = new Date(Date.UTC(org.month.getUTCFullYear(), org.month.getUTCMonth() + by, 1));
 }
@@ -873,8 +900,7 @@ function setClock(button) {
   const { key, value } = button.dataset;
   const combo = button.closest('.combo');
   const input = $('#' + key, combo);
-  input.value = value;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  applyInputValue(input, value);
   if (key.endsWith('h')) {
     focusClockChoice(combo, 'm');
   } else {
@@ -1062,21 +1088,21 @@ const actions = {
   'toggle-menu': button => setMenu(button.getAttribute('aria-expanded') !== 'true'),
   'close-menu': () => closeMenu(true),
   'new-event': async () => {
-    const destination = cloud || DemoStore;
+    const destination = cloud || LocalStore;
     openEvent(await destination.create(destination.identity()), 'organizer');
   },
   'open-event': button => openEvent(button.dataset.eventId, 'organizer'),
   'pin-event': button => {
-    if (DemoStore.isPinned(baseUid, eventId)) DemoStore.unpin(baseUid, eventId);
-    else DemoStore.pin(baseUid, eventId, event().title);
+    if (LocalStore.isPinned(uid, eventId)) LocalStore.unpin(uid, eventId);
+    else LocalStore.pin(uid, eventId, event().title);
     updatePinButton(button);
     renderPins();
   },
   'unpin-event': button => {
     const { identity, eventId: id } = button.dataset;
-    DemoStore.unpin(identity, id);
+    LocalStore.unpin(identity, id);
     const currentPin = $('[data-action=pin-event]');
-    if (currentPin && id === eventId && identity === baseUid) updatePinButton(currentPin);
+    if (currentPin && id === eventId && identity === uid) updatePinButton(currentPin);
     renderPins();
     ($('#pinned-events .pinned-open') ?? $('#go-home')).focus();
   },
@@ -1094,6 +1120,30 @@ const actions = {
     ($('#view-title') ?? $('#main')).focus();
   },
   'close-dialog': () => dialog.close(),
+  'event-names': () => {
+    dialog.replaceChildren(template('event-names'));
+    const form = $('#save-event-name-form', dialog);
+    const input = $('#saved-event-name-input', form);
+    const title = org.title.trim();
+    if ((org.base.slots.length || org.title !== org.base.title) && !LocalStore.listEventNames(localUid).includes(title)) {
+      input.value = title;
+    }
+    form.addEventListener('submit', addSavedEventName);
+    input.addEventListener('input', () => showInputError([input], $('#saved-event-name-error', form), ''));
+    renderSavedEventNames();
+    dialog.showModal();
+  },
+  'use-event-name': button => {
+    applyInputValue($('#event-name', view), button.textContent);
+    dialog.close();
+  },
+  'remove-event-name': button => {
+    const index = $$('[data-action=remove-event-name]', dialog).indexOf(button);
+    LocalStore.forgetEventName(localUid, button.dataset.title);
+    renderSavedEventNames();
+    const remaining = $$('[data-action=remove-event-name]', dialog);
+    (remaining[Math.min(index, remaining.length - 1)] ?? $('[data-action=close-dialog]', dialog)).focus();
+  },
   copy: async () => {
     const input = $('#share-url');
     try {
@@ -1163,7 +1213,7 @@ const actions = {
   },
   'delete-event': () => confirmEventDeletion(store, eventId, uid, event().title),
   'delete-listed-event': button => {
-    const destination = button.dataset.shared === 'true' ? cloud : DemoStore;
+    const destination = button.dataset.shared === 'true' ? cloud : LocalStore;
     const identity = destination.identity();
     const target = destination.listOwned(identity).find(item => item.event.id === button.dataset.eventId);
     if (!target) throw new Error('イベントが見つかりません。');
@@ -1212,7 +1262,7 @@ const actions = {
       return;
     }
     await store.submit(eventId, uid, current.revision, current);
-    if (uid === baseUid) rememberPersonalEvent(true);
+    rememberPersonalEvent(true);
     current.dirty = false;
     current.stale = false;
     current.checked = false;
@@ -1359,18 +1409,9 @@ view.addEventListener('input', evt => {
 
 document.addEventListener('change', evt => {
   const field = evt.target;
-  if (demoEnabled && field.id === 'profile') {
-    const value = field.value;
-    const changeProfile = () => {
-      if (value === 'new') {
-        uid = DemoStore.addProfile(eventId);
-        simulated.push(uid);
-      } else uid = value;
-      setScreen(owner() && screen === 'organizer' ? 'organizer' : 'answer');
-    };
-    if (confirmNavigation(changeProfile)) field.value = uid;
-    else changeProfile();
-    return;
+  if (field.dataset.fillSetting && field.value) {
+    applyInputValue($('#' + field.dataset.fillSetting, view), field.value);
+    field.value = '';
   }
   if (field.id === 'has-end') {
     org.hasEnd = field.checked;
@@ -1416,12 +1457,12 @@ function refreshEvent(next) {
   focusFinalBanner();
 }
 
-DemoStore.subscribe(id => {
+LocalStore.subscribe(id => {
   if (screen === 'home') {
     renderHome();
     return;
   }
-  if (store === DemoStore && id === eventId) refreshEvent(DemoStore.get(id));
+  if (store === LocalStore && id === eventId) refreshEvent(LocalStore.get(id));
 });
 
 matchMedia('(max-width: 820px)').addEventListener('change', evt => { if (!evt.matches) closeMenu(); });
@@ -1462,7 +1503,7 @@ async function start() {
   window.addEventListener('popstate', restoreRoute);
   restoreRoute();
   if (failed) toast('共有機能に接続できませんでした。このブラウザーに保存したイベントは開けます。');
-  else if (!DemoStore.persistent) toast('ブラウザの保存機能が無効です。このタブを閉じるまで操作できます。');
+  else if (!LocalStore.persistent) toast('ブラウザの保存機能が無効です。このタブを閉じるまで操作できます。');
 }
 
 start();
